@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Performance &amp; MKT · Agroadvance</title>
+  <link rel="stylesheet" href="assets/css/theme.css" />
+</head>
+<body>
+
+<main class="area-page">
+
+  <a class="home-mark brand-logo" href="index.html" aria-label="Agroadvance">
+    <img src="assets/img/LogoAgro.png" alt="Agroadvance" class="brand-logo-img" />
+  </a>
+
+  <a class="area-back" href="index.html" aria-label="Voltar">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+  </a>
+
+  <div class="home-toggle">
+    <button class="theme-toggle" id="themeToggle" aria-label="Alternar tema">
+      <svg class="tt-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+      <svg class="tt-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="hidden"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+  </div>
+
+  <div class="area-inner">
+
+    <h1 class="area-title">Performance<br/><em>&amp; Marketing</em></h1>
+
+    <div class="paineis-grid-clean">
+
+      <a class="btn-liquid btn-clean brand fade-up" style="animation-delay: 60ms;" href="performance-mkt.html">
+        <span class="btn-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9M14 17V5M10 17v-6M6 17v-3"/></svg>
+        </span>
+        <span class="btn-label-center">Análise de Funil</span>
+        <span class="btn-arrow">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+        </span>
+      </a>
+
+      <a class="btn-liquid btn-clean accent locked fade-up" style="animation-delay: 140ms;" href="#" onclick="return false;">
+        <span class="btn-icon"></span>
+        <span class="btn-label-center">Perfil de Lead</span>
+        <span class="btn-arrow">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+        </span>
+      </a>
+
+      <a class="btn-liquid btn-clean locked fade-up" style="animation-delay: 220ms;" href="#" onclick="return false;">
+        <span class="btn-icon"></span>
+        <span class="btn-label-center">Atribuição</span>
+        <span class="btn-arrow">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+        </span>
+      </a>
+
+    </div>
+  </div>
+
+</main>
+
+<script>
+  (function() {
+    const saved = localStorage.getItem('hub-theme') || 'light';
+    document.documentElement.dataset.theme = saved;
+    document.getElementById('themeToggle').addEventListener('click', () => {
+      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      localStorage.setItem('hub-theme', next);
+    });
+  })();
+</script>
+
+</body>
+</html>

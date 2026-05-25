@@ -1,0 +1,46 @@
+# =========================================================
+# HUB Agroadvance — .gitignore
+# Mantém o repo leve: só commita código + JSON gerado
+# =========================================================
+
+# Dados brutos (xlsx, csv) — NÃO commitar. São gerados pelo SharePoint
+*.xlsx
+*.xlsm
+*.xlsb
+*.csv
+
+# Pasta legada do App Juntar RD (não usa mais com o flow do SharePoint)
+App Juntar RD/
+
+# Backups locais
+**/BACKUPS/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Ferramentas Claude / IDEs
+.claude/
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Logs e temporários
+*.log
+*.tmp
+~$*
+
+# Arquivos sensíveis (não deve ter, mas por garantia)
+.env
+*.key
+credentials.json
