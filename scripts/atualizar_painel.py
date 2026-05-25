@@ -146,6 +146,7 @@ COLUNAS_OBRIGATORIAS = {
     "Atividades": [
         "Atividade - Atualizado em",
         "Atividade - Data e hora de conclusão",
+        "Atividade - Data adicionada",            # data oficial da reunião (gestor 2026-05-25)
         "Atividade - Tipo",
         "Atividade - Concluído",
         "Atividade - ID",
@@ -218,6 +219,10 @@ def carrega_bases():
     ativ["Atividade - Atualizado em"] = pd.to_datetime(ativ["Atividade - Atualizado em"], errors="coerce")
     ativ["Atividade - Data e hora de conclusão"] = pd.to_datetime(
         ativ["Atividade - Data e hora de conclusão"], errors="coerce"
+    )
+    # Data oficial da reunião (definido com gestor 2026-05-25)
+    ativ["Atividade - Data adicionada"] = pd.to_datetime(
+        ativ["Atividade - Data adicionada"], errors="coerce"
     )
 
     log("Lendo Negócios B2C...")
@@ -883,9 +888,11 @@ def por_tipo_curso_mensal(rd, neg_classificado, ativ, grupo, atribuicao) -> list
     ].copy()
     ativ_reu = ativ_reu[ativ_reu["Negócio - ID"].astype(int).isin(reu_referencia_ids)]
     ativ_reu["_tipo"] = ativ_reu["Negócio - ID"].astype(int).map(neg_tipo_map).fillna("outros")
-    ativ_reu["data_atv"] = ativ_reu["Atividade - Data e hora de conclusão"].fillna(
-        ativ_reu["Atividade - Atualizado em"]
-    )
+    # Data oficial da reunião: "Atividade - Data adicionada" (gestor 2026-05-25)
+    # Fallback: Data e hora de conclusão; depois Atualizado em
+    ativ_reu["data_atv"] = ativ_reu["Atividade - Data adicionada"].fillna(
+        ativ_reu["Atividade - Data e hora de conclusão"]
+    ).fillna(ativ_reu["Atividade - Atualizado em"])
     ativ_reu["AnoMes"] = ativ_reu["data_atv"].dt.to_period("M").astype(str)
 
     out = []
@@ -1311,14 +1318,15 @@ def detalhamento_mensal(rd, inv, neg, ativ, grupo, atribuicao) -> list:
         ganhos_ids = atribuicao["topo"]["assistencia_neg_ids"]
         rqs_neg_ids_referencia = atribuicao["topo"]["reunioes_assistidas_ids"]
 
-    # Atividades Reunião CONCLUÍDAS — usa Data e hora de conclusão (fallback Atualizado em)
+    # Atividades Reunião CONCLUÍDAS — usa Data adicionada (gestor 2026-05-25)
+    # Fallback: Data e hora de conclusão; depois Atualizado em
     ativ_reu = ativ[
         ativ["Atividade - Tipo"].str.contains("Reunião", case=False, na=False)
         & (ativ["Atividade - Concluído"] == "Concluído")
     ].copy()
-    ativ_reu["data_atv"] = ativ_reu["Atividade - Data e hora de conclusão"].fillna(
-        ativ_reu["Atividade - Atualizado em"]
-    )
+    ativ_reu["data_atv"] = ativ_reu["Atividade - Data adicionada"].fillna(
+        ativ_reu["Atividade - Data e hora de conclusão"]
+    ).fillna(ativ_reu["Atividade - Atualizado em"])
     ativ_reu = ativ_reu[ativ_reu["Negócio - ID"].astype(int).isin(rqs_neg_ids_referencia)]
     ativ_reu["AnoMes"] = ativ_reu["data_atv"].dt.to_period("M").astype(str)
 
