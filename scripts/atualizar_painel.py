@@ -29,18 +29,31 @@ warnings.filterwarnings("ignore")
 # Caminhos
 # ----------------------------------------------------------------------------
 BASE = Path(__file__).resolve().parent.parent
-PASTA_BASES = BASE
-PASTA_SAIDA = BASE / "hub" / "dados"
+PASTA_BASES = BASE / "bases"          # pasta das 4 planilhas-fonte
+PASTA_SAIDA = BASE / "hub" / "dados"  # JSON gerado pelo pipeline
 PASTA_SAIDA.mkdir(parents=True, exist_ok=True)
 
 def encontra_xlsx(prefixo: str) -> Path:
-    """Encontra o arquivo mais recente que começa com o prefixo (independente de sufixo de versão)."""
+    """Encontra o arquivo mais recente que começa com o prefixo (independente de sufixo de versão).
+
+    Procura primeiro em bases/, depois na raiz (compatibilidade com layout antigo).
+    """
+    # 1) bases/ (layout atual)
     candidatos = sorted(
         PASTA_BASES.glob(f"{prefixo}*.xlsx"),
         key=lambda p: p.stat().st_mtime, reverse=True
     )
+    # 2) Fallback: raiz (layout legado pré 2026-05-25)
     if not candidatos:
-        raise FileNotFoundError(f"Nenhum arquivo encontrado começando com '{prefixo}' em {PASTA_BASES}")
+        candidatos = sorted(
+            BASE.glob(f"{prefixo}*.xlsx"),
+            key=lambda p: p.stat().st_mtime, reverse=True
+        )
+    if not candidatos:
+        raise FileNotFoundError(
+            f"Nenhum arquivo encontrado começando com '{prefixo}'.\n"
+            f"  Verifique se o arquivo está em: {PASTA_BASES}"
+        )
     return candidatos[0]
 
 

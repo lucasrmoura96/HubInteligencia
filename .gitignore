@@ -9,8 +9,8 @@
 *.xlsb
 *.csv
 
-# Pasta legada do App Juntar RD (não usa mais com o flow do SharePoint)
-App Juntar RD/
+# Pasta de arquivamento (legado, não vai pro git)
+_arquivado/
 
 # Backups locais
 **/BACKUPS/

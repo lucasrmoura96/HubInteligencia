@@ -23,13 +23,17 @@ Ao executar, ele:
 
 ```
 PAINEL MKT/
-├── Atualizar HUB MKT.bat          ← clica aqui pra atualizar tudo
-├── Atividades B2C Pipedrive.xlsx  ← bases brutas (NÃO commitadas)
-├── Negócios B2C Pipedrive.xlsx
-├── Investimento Gerenciadores Mkt.xlsx
-├── RD Station V2.xlsx
 │
-├── hub/                            ← painel estático (commitado)
+├── 🎯 Atualizar HUB MKT.bat        ← clica aqui pra atualizar tudo
+├── 📘 README.md
+│
+├── 📂 bases/                       ← 4 planilhas-fonte (NÃO commitadas)
+│   ├── Atividades B2C Pipedrive.xlsx
+│   ├── Negócios B2C Pipedrive.xlsx
+│   ├── Investimento Gerenciadores Mkt.xlsx
+│   └── RD Station V2.xlsx
+│
+├── 🌐 hub/                         ← painel estático (commitado, vai pro GitHub Pages)
 │   ├── index.html
 │   ├── area-mkt.html
 │   ├── performance-mkt.html
@@ -43,9 +47,18 @@ PAINEL MKT/
 │       ├── performance_mkt.js
 │       └── ultima_atualizacao.json
 │
-└── scripts/
-    └── atualizar_painel.py         ← pipeline pandas
+├── ⚙️ scripts/
+│   └── atualizar_painel.py         ← pipeline pandas
+│
+└── 📦 _arquivado/                  ← legado (App Juntar RD, ignorado pelo git)
 ```
+
+### Como atualizar as bases
+
+1. Abra cada planilha em `bases/` no Excel
+2. Use **Dados → Atualizar Tudo** (puxa do SharePoint via PowerQuery)
+3. Salve e feche o arquivo
+4. Execute `Atualizar HUB MKT.bat` na raiz
 
 ## 🔧 Dependências locais
 
