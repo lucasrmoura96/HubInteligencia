@@ -18,7 +18,57 @@ if ($arquivos.Count -eq 0) {
     exit 1
 }
 
-# Inicia Excel em background (sem janela visivel)
+# ---------------------------------------------------------
+# Limpeza preventiva: mata processos Excel.exe orfaos
+# (execucoes anteriores podem deixar Excel "fantasma" travando arquivos)
+# ---------------------------------------------------------
+$excelProcs = Get-Process -Name 'EXCEL' -ErrorAction SilentlyContinue
+if ($excelProcs) {
+    Write-Host "        Encontrei $($excelProcs.Count) processo(s) Excel rodando." -ForegroundColor Yellow
+    Write-Host "        Encerrando antes de comecar (libera arquivos travados)..." -ForegroundColor Yellow
+    $excelProcs | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+}
+
+# Pequena pausa para OneDrive terminar qualquer sync pendente
+Start-Sleep -Milliseconds 800
+
+# ---------------------------------------------------------
+# Verifica locks (arquivos com handle aberto por outro processo)
+# ---------------------------------------------------------
+function Test-FileLock {
+    param([string]$Path)
+    try {
+        $stream = [System.IO.File]::Open($Path, 'Open', 'ReadWrite', 'None')
+        $stream.Close()
+        return $false
+    } catch {
+        return $true
+    }
+}
+
+$travados = @()
+foreach ($arq in $arquivos) {
+    if (Test-FileLock $arq.FullName) {
+        $travados += $arq.Name
+    }
+}
+
+if ($travados.Count -gt 0) {
+    Write-Host ""
+    Write-Host "  [ERRO] Estes arquivos estao travados por outro processo:" -ForegroundColor Red
+    foreach ($t in $travados) { Write-Host "         - $t" -ForegroundColor Red }
+    Write-Host ""
+    Write-Host "         Causas possiveis:" -ForegroundColor Yellow
+    Write-Host "           1) Excel aberto manualmente (mesmo minimizado/segundo plano)" -ForegroundColor Yellow
+    Write-Host "           2) OneDrive sincronizando agora (aguarde 30s e tente de novo)" -ForegroundColor Yellow
+    Write-Host "           3) Antivirus escaneando o arquivo (aguarde alguns segundos)" -ForegroundColor Yellow
+    exit 3
+}
+
+# ---------------------------------------------------------
+# Inicia Excel em background
+# ---------------------------------------------------------
 $xl = $null
 try {
     $xl = New-Object -ComObject Excel.Application
@@ -40,40 +90,48 @@ $falhas = @()
 try {
     foreach ($arq in $arquivos) {
         $nomeCurto = $arq.Name
-        # Trunca nome longo para alinhamento visual
         if ($nomeCurto.Length -gt 42) { $nomeCurto = $nomeCurto.Substring(0, 39) + '...' }
         $padded = $nomeCurto.PadRight(45)
         Write-Host "        > $padded" -NoNewline
 
-        try {
-            $wb = $xl.Workbooks.Open($arq.FullName, 0, $false)
+        $tentativas = 0
+        $sucesso = $false
+        $ultimoErro = ''
 
-            # Forca PowerQuery em modo sincrono (RefreshAll bloqueia ate terminar)
-            foreach ($conn in $wb.Connections) {
-                try {
-                    if ($conn.OLEDBConnection) { $conn.OLEDBConnection.BackgroundQuery = $false }
-                    if ($conn.ODBCConnection)  { $conn.ODBCConnection.BackgroundQuery  = $false }
-                } catch {}
-            }
-            # Tambem desliga BackgroundQuery em Queries do PowerQuery (Excel 2016+)
+        while (-not $sucesso -and $tentativas -lt 3) {
+            $tentativas++
             try {
-                foreach ($q in $wb.Queries) {
-                    # Algumas versoes nao expoem refresh sync por aqui; ignoramos
+                # Open(filename, updateLinks=0, readOnly=$false, ...)
+                $wb = $xl.Workbooks.Open($arq.FullName, 0, $false, [Type]::Missing, [Type]::Missing, [Type]::Missing, $true, [Type]::Missing, [Type]::Missing, [Type]::Missing, [Type]::Missing, [Type]::Missing, $false)
+
+                # Forca PowerQuery em modo sincrono
+                foreach ($conn in $wb.Connections) {
+                    try {
+                        if ($conn.OLEDBConnection) { $conn.OLEDBConnection.BackgroundQuery = $false }
+                        if ($conn.ODBCConnection)  { $conn.ODBCConnection.BackgroundQuery  = $false }
+                    } catch {}
                 }
-            } catch {}
 
-            $wb.RefreshAll()
-            # Margem de seguranca apos refresh (PowerQuery pode levar 1-3s extras)
-            Start-Sleep -Seconds 2
-            $wb.Save()
-            $wb.Close($false)
+                $wb.RefreshAll()
+                Start-Sleep -Seconds 2
+                $wb.Save()
+                $wb.Close($false)
+                $sucesso = $true
+            } catch {
+                $ultimoErro = $_.Exception.Message
+                try { if ($wb) { $wb.Close($false) } } catch {}
+                if ($tentativas -lt 3) {
+                    Start-Sleep -Seconds 2
+                }
+            }
+        }
 
+        if ($sucesso) {
             Write-Host " [OK]" -ForegroundColor Green
             $ok++
-        } catch {
+        } else {
             Write-Host " [FALHOU]" -ForegroundColor Red
-            $falhas += "$($arq.Name): $($_.Exception.Message)"
-            try { if ($wb) { $wb.Close($false) } } catch {}
+            $falhas += "$($arq.Name): $ultimoErro"
         }
     }
 } finally {
@@ -81,6 +139,10 @@ try {
     [System.Runtime.InteropServices.Marshal]::ReleaseComObject($xl) | Out-Null
     [System.GC]::Collect() | Out-Null
     [System.GC]::WaitForPendingFinalizers() | Out-Null
+
+    # Garante que nenhum Excel fica orfao depois
+    Start-Sleep -Milliseconds 500
+    Get-Process -Name 'EXCEL' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host ""
