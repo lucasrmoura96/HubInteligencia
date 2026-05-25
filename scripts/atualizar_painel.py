@@ -163,6 +163,7 @@ COLUNAS_OBRIGATORIAS = {
         "Pessoa - E-mail - Trabalho",
         "Pessoa - E-mail - Outros",
         "Negócio - Proprietário",
+        "Negócio - Produto de Interesse",  # usado pra inferir tipo (MBA/Pós/Imersão)
     ],
     "Investimento": [
         "Data",
@@ -725,6 +726,99 @@ def agregado_por_curso(rd: pd.DataFrame, inv: pd.DataFrame, grupo: str) -> list:
             "cpmql": round(safe_div(custo, r["mqls"]), 2),
         })
     out.sort(key=lambda x: x["leads"], reverse=True)
+    return out
+
+
+# ----------------------------------------------------------------------------
+# Normalização: descobre o tipo (mba/pos/imersoes/outros) a partir do nome do curso.
+# Espelha a função getCursoTipo() do JS para consistência entre back e front.
+# ----------------------------------------------------------------------------
+def normaliza_tipo_curso(curso) -> str:
+    if pd.isna(curso):
+        return "outros"
+    import unicodedata
+    c = str(curso).strip().lower()
+    # Remove acentos para tolerar variações ("Pós" vs "Pos")
+    c = ''.join(ch for ch in unicodedata.normalize('NFD', c) if unicodedata.category(ch) != 'Mn')
+    if c.startswith('mba'):
+        return 'mba'
+    if 'imersao' in c:
+        return 'imersoes'
+    if c.startswith('pos'):
+        return 'pos'
+    return 'outros'
+
+
+# ----------------------------------------------------------------------------
+# Agregado por Tipo × Mês — cruza tipo de curso com financeiro (E6-05)
+# Permite que o JS preencha Reuniões, Matrículas, ROAS, Faturamento, CPA
+# ao filtrar por tipo (MBA/Pós/Imersões) em vez de mostrar "—".
+#
+# Fonte do tipo:
+#   - Negócios: coluna "Negócio - Produto de Interesse" (65% preench, 24 únicos)
+#     com fallback para "Negócio - Curso"
+#   - Atividades: herdam o tipo via Negócio - ID -> Negócios
+# ----------------------------------------------------------------------------
+def por_tipo_curso_mensal(rd, neg, ativ, grupo, atribuicao) -> list:
+    n = neg.copy()
+    # Coluna unificada de curso do negócio (preferencia: Produto de Interesse > Curso)
+    n["_curso_neg"] = n.get("Negócio - Produto de Interesse")
+    if "Negócio - Curso" in n.columns:
+        n["_curso_neg"] = n["_curso_neg"].fillna(n["Negócio - Curso"])
+    n["_tipo"] = n["_curso_neg"].apply(normaliza_tipo_curso)
+
+    if grupo == "Fundo":
+        ganhos_ids = atribuicao["fundo"]["ganhos_neg_ids"]
+        reu_referencia_ids = set(
+            n.loc[n["Negócio - Qualificação/Feedback:"].isin(["Qualificação OK", "Check Liderança"]),
+                  "Negócio - ID"].astype(int)
+        )
+    else:
+        ganhos_ids = atribuicao["topo"]["assistencia_neg_ids"]
+        reu_referencia_ids = atribuicao["topo"]["reunioes_assistidas_ids"]
+
+    # Ganhos atribuídos a este grupo, com data e tipo
+    neg_ganho = n[(n["Negócio - Status"] == "Ganho")
+                  & (n["Negócio - ID"].astype(int).isin(ganhos_ids))].copy()
+    neg_ganho["AnoMes"] = neg_ganho["Negócio - Ganho em"].dt.to_period("M").astype(str)
+
+    # Atividades-reunião concluídas em negócios qualificados, com tipo herdado
+    neg_tipo_map = dict(zip(n["Negócio - ID"].astype(int), n["_tipo"]))
+    ativ_reu = ativ[
+        ativ["Atividade - Tipo"].str.contains("Reunião", case=False, na=False)
+        & (ativ["Atividade - Concluído"] == "Concluído")
+    ].copy()
+    ativ_reu = ativ_reu[ativ_reu["Negócio - ID"].astype(int).isin(reu_referencia_ids)]
+    ativ_reu["_tipo"] = ativ_reu["Negócio - ID"].astype(int).map(neg_tipo_map).fillna("outros")
+    ativ_reu["data_atv"] = ativ_reu["Atividade - Data e hora de conclusão"].fillna(
+        ativ_reu["Atividade - Atualizado em"]
+    )
+    ativ_reu["AnoMes"] = ativ_reu["data_atv"].dt.to_period("M").astype(str)
+
+    out = []
+    meses_universo = sorted(
+        set(neg_ganho["AnoMes"].dropna()) | set(ativ_reu["AnoMes"].dropna())
+    )
+    for tipo in ["mba", "pos", "imersoes", "outros"]:
+        for m in meses_universo:
+            try:
+                ano, mes = m.split("-")
+                ano, mes = int(ano), int(mes)
+            except Exception:
+                continue
+            g_m = neg_ganho[(neg_ganho["AnoMes"] == m) & (neg_ganho["_tipo"] == tipo)]
+            r_m = ativ_reu[(ativ_reu["AnoMes"] == m) & (ativ_reu["_tipo"] == tipo)]
+            ganhos = len(g_m)
+            reunioes = len(r_m)
+            faturamento = float(g_m["Negócio - Valor"].sum())
+            if ganhos == 0 and reunioes == 0 and faturamento == 0:
+                continue  # economiza espaço no JSON
+            out.append({
+                "ano": ano, "mes": mes, "tipo": tipo,
+                "reunioes": reunioes,
+                "ganhos": ganhos,
+                "faturamento": round(faturamento, 2),
+            })
     return out
 
 
@@ -1327,6 +1421,10 @@ def main():
     topo_por_curso_mensal = por_curso_mensal(rd, inv, "Topo")
     fundo_por_curso_mensal = por_curso_mensal(rd, inv, "Fundo")
 
+    log("Tipo × Mês (Reuniões/Matrículas/Faturamento por tipo de curso)...")
+    topo_por_tipo_mensal = por_tipo_curso_mensal(rd, neg, ativ, "Topo", atribuicao)
+    fundo_por_tipo_mensal = por_tipo_curso_mensal(rd, neg, ativ, "Fundo", atribuicao)
+
     log("Calculando funis (Topo e Fundo)...")
     topo_funil = funil_completo(rd, ativ, neg, "Topo", atribuicao)
     fundo_funil = funil_completo(rd, ativ, neg, "Fundo", atribuicao)
@@ -1385,6 +1483,7 @@ def main():
             "todas_campanhas": topo_todas,
             "por_curso_real": topo_por_curso_real,
             "por_curso_mensal": topo_por_curso_mensal,
+            "por_tipo_mensal": topo_por_tipo_mensal,
             "funil": topo_funil,
             "financeiro": topo_fin,
             "mensal": topo_mes,
@@ -1402,6 +1501,7 @@ def main():
             "todas_campanhas": fundo_todas,
             "por_curso_real": fundo_por_curso_real,
             "por_curso_mensal": fundo_por_curso_mensal,
+            "por_tipo_mensal": fundo_por_tipo_mensal,
             "funil": fundo_funil,
             "financeiro": fundo_fin,
             "mensal": fundo_mes,

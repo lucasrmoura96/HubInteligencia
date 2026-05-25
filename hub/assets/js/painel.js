@@ -251,40 +251,59 @@ function calcKpisFiltrados() {
 
   if (STATE.selecao) return calcKpisSelecao();
 
-  // Quando há filtro de TIPO de curso, recalcula respeitando AMBOS:
-  // tipo (mba/pos/imersoes) + filtro temporal (ano/mes).
-  // Usa por_curso_mensal (curso × mês) quando disponível; fallback para por_curso_real
-  // (agregado total, ignora data) se o pipeline antigo ainda estiver em uso.
-  // Faturamento/Ganhos/RQs ficam null porque não temos breakdown por curso.
+  // Quando há filtro de TIPO de curso, combina:
+  //   - por_curso_mensal (curso × mês)  → leads, mqls, custo
+  //   - por_tipo_mensal  (tipo × mês)   → reuniões, ganhos, faturamento (via Negócio - Produto de Interesse)
+  // E deriva ROAS/CAC/Ticket/CPR a partir desses valores.
   if (tipo !== 'all') {
-    let acc;
+    // === Lead, MQL, Custo: vem do agregado por curso ===
+    let leadsMqlsCusto;
     if (tab.por_curso_mensal && tab.por_curso_mensal.length) {
-      // Filtra por (ano, mes) primeiro, depois por tipo de curso
       let rows = tab.por_curso_mensal;
       if (ano !== 'all') rows = rows.filter(r => String(r.ano) === String(ano));
       if (mes !== 'all') rows = rows.filter(r => String(r.mes) === String(mes));
       rows = rows.filter(r => cursoMatchTipo(r.curso, tipo));
-      acc = rows.reduce((a, c) => ({
+      leadsMqlsCusto = rows.reduce((a, c) => ({
         leads: a.leads + c.leads,
         mqls:  a.mqls  + c.mqls,
         custo: a.custo + c.custo,
       }), { leads: 0, mqls: 0, custo: 0 });
     } else {
-      // Fallback: dados antigos sem por_curso_mensal — ignora data (comportamento legado)
+      // Fallback legado: por_curso_real (sem dimensão temporal)
       const cursos = (tab.por_curso_real || []).filter(c => cursoMatchTipo(c.curso, tipo));
-      acc = cursos.reduce((a, c) => ({
+      leadsMqlsCusto = cursos.reduce((a, c) => ({
         leads: a.leads + c.leads,
         mqls:  a.mqls  + c.mqls,
         custo: a.custo + c.custo,
       }), { leads: 0, mqls: 0, custo: 0 });
     }
+
+    // === Reuniões, Ganhos, Faturamento: vem do agregado por tipo ===
+    let financeiro = { reunioes: null, ganhos: null, faturamento: null };
+    if (tab.por_tipo_mensal && tab.por_tipo_mensal.length) {
+      let rowsT = tab.por_tipo_mensal.filter(r => r.tipo === tipo);
+      if (ano !== 'all') rowsT = rowsT.filter(r => String(r.ano) === String(ano));
+      if (mes !== 'all') rowsT = rowsT.filter(r => String(r.mes) === String(mes));
+      financeiro = rowsT.reduce((a, c) => ({
+        reunioes:    a.reunioes    + c.reunioes,
+        ganhos:      a.ganhos      + c.ganhos,
+        faturamento: a.faturamento + c.faturamento,
+      }), { reunioes: 0, ganhos: 0, faturamento: 0 });
+    }
+
+    const custo = leadsMqlsCusto.custo;
     return {
-      ...acc,
-      pct_mql: acc.leads ? (acc.mqls/acc.leads*100) : 0,
-      cpl:     acc.leads ? (acc.custo/acc.leads) : 0,
-      cpmql:   acc.mqls  ? (acc.custo/acc.mqls)  : 0,
-      ganhos: null, faturamento: null, reunioes: null,
-      ticket_medio: null, roas: null, cac: null,
+      ...leadsMqlsCusto,
+      ...financeiro,
+      pct_mql:         leadsMqlsCusto.leads ? (leadsMqlsCusto.mqls/leadsMqlsCusto.leads*100) : 0,
+      pct_mql_reuniao: leadsMqlsCusto.mqls && financeiro.reunioes != null ? (financeiro.reunioes/leadsMqlsCusto.mqls*100) : 0,
+      pct_reuniao_ganho: financeiro.reunioes && financeiro.ganhos != null ? (financeiro.ganhos/financeiro.reunioes*100) : 0,
+      cpl:    leadsMqlsCusto.leads ? (custo/leadsMqlsCusto.leads) : 0,
+      cpmql:  leadsMqlsCusto.mqls  ? (custo/leadsMqlsCusto.mqls)  : 0,
+      cpr:    financeiro.reunioes  ? (custo/financeiro.reunioes)  : 0,
+      ticket_medio: financeiro.ganhos ? (financeiro.faturamento/financeiro.ganhos) : 0,
+      roas:   custo ? (financeiro.faturamento/custo) : 0,
+      cac:    financeiro.ganhos ? (custo/financeiro.ganhos) : 0,
     };
   }
 
@@ -1879,12 +1898,10 @@ function renderEmptyStateBanner() {
   let mensagem = null;
 
   if (!STATE.selecao && hasFiltro && zerado) {
-    // Caso 1: filtro vazio — sem registros para o recorte
+    // Filtro vazio — sem registros para o recorte
     mensagem = '<strong>Sem dados.</strong> Não há registros para este recorte de filtro. Ajuste o período ou o tipo de curso.';
-  } else if (!STATE.selecao && STATE.tipoCurso !== 'all') {
-    // Caso 2: tipo de curso ativo — financeiro zerado por design (sem breakdown por curso)
-    mensagem = '<strong>Filtro de tipo ativo.</strong> Reuniões, Matrículas, ROAS, Faturamento e CPA aparecem como "—" porque o cruzamento financeiro com tipo de curso ainda não é suportado pelo pipeline.';
   }
+  // (Removido: banner de tipoCurso obsoleto — agora o pipeline preenche Reuniões/Matrículas/ROAS/Faturamento/CPA via por_tipo_mensal.)
 
   if (mensagem) {
     if (!banner) {
