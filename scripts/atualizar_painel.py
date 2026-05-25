@@ -734,11 +734,10 @@ def agregado_por_curso(rd: pd.DataFrame, inv: pd.DataFrame, grupo: str) -> list:
 # Espelha a função getCursoTipo() do JS para consistência entre back e front.
 # ----------------------------------------------------------------------------
 def normaliza_tipo_curso(curso) -> str:
-    if pd.isna(curso):
+    if pd.isna(curso) or not str(curso).strip():
         return "outros"
     import unicodedata
     c = str(curso).strip().lower()
-    # Remove acentos para tolerar variações ("Pós" vs "Pos")
     c = ''.join(ch for ch in unicodedata.normalize('NFD', c) if unicodedata.category(ch) != 'Mn')
     if c.startswith('mba'):
         return 'mba'
@@ -747,6 +746,104 @@ def normaliza_tipo_curso(curso) -> str:
     if c.startswith('pos'):
         return 'pos'
     return 'outros'
+
+
+# ----------------------------------------------------------------------------
+# Atribuição multi-camada do tipo de curso para cada Negócio.
+# Maximiza cobertura E precisão usando 4 fontes em ordem de prioridade:
+#   A) Negócio - Curso             (89% pra ganhos — source of truth do que foi vendido)
+#   B) Negócio - Nome do produto   (88% pra ganhos — backup)
+#   C) Negócio - Produto de Interesse (60-91% — bom pra abertos/perdidos)
+#   D) RD Station via email do lead (99% — fallback robusto)
+#   E) "outros"                    (último recurso)
+# ----------------------------------------------------------------------------
+def atribui_tipos_negocios(neg: pd.DataFrame, rd: pd.DataFrame):
+    """Retorna DataFrame neg com colunas extras: _tipo e _camada (auditoria).
+
+    _tipo: 'mba' | 'pos' | 'imersoes' | 'outros'
+    _camada: 'A_curso' | 'B_produto' | 'C_interesse' | 'D_rd_email' | 'E_outros'
+    """
+    n = neg.copy()
+
+    # Pré-processa RD: para cada email, qual o tipo mais frequente?
+    rd_clean = rd[['E-mail Lead', 'Curso']].dropna(subset=['E-mail Lead']).copy()
+    rd_clean['email_norm'] = rd_clean['E-mail Lead'].astype(str).str.lower().str.strip()
+    rd_clean = rd_clean[rd_clean['email_norm'] != '']
+    rd_clean['_tipo'] = rd_clean['Curso'].apply(normaliza_tipo_curso)
+
+    # Para cada email: tipo mais frequente (excluindo 'outros' se houver alternativa)
+    email_tipo = {}
+    for email, grp in rd_clean.groupby('email_norm'):
+        contagem = grp['_tipo'].value_counts()
+        # Se há tipos != 'outros', escolhe o mais frequente entre os classificados
+        bons = contagem[contagem.index != 'outros']
+        if len(bons) > 0:
+            email_tipo[email] = bons.idxmax()
+        else:
+            email_tipo[email] = 'outros'
+
+    # Função que extrai emails de um negócio (Trabalho + Outros)
+    def emails_do_negocio(row):
+        out = []
+        for col in ['Pessoa - E-mail - Trabalho', 'Pessoa - E-mail - Outros']:
+            val = row.get(col)
+            if pd.notna(val):
+                for sub in str(val).replace(';', ',').split(','):
+                    sub = sub.strip().lower()
+                    if sub:
+                        out.append(sub)
+        return out
+
+    # Aplica camadas em ordem
+    tipos = []
+    camadas = []
+    for _, row in n.iterrows():
+        # Camada A: Negócio - Curso
+        t = normaliza_tipo_curso(row.get('Negócio - Curso'))
+        if t != 'outros':
+            tipos.append(t); camadas.append('A_curso'); continue
+
+        # Camada B: Negócio - Nome do produto
+        t = normaliza_tipo_curso(row.get('Negócio - Nome do produto'))
+        if t != 'outros':
+            tipos.append(t); camadas.append('B_produto'); continue
+
+        # Camada C: Negócio - Produto de Interesse
+        t = normaliza_tipo_curso(row.get('Negócio - Produto de Interesse'))
+        if t != 'outros':
+            tipos.append(t); camadas.append('C_interesse'); continue
+
+        # Camada D: RD Station via email
+        emails = emails_do_negocio(row)
+        t_rd = 'outros'
+        for e in emails:
+            if e in email_tipo:
+                cand = email_tipo[e]
+                if cand != 'outros':
+                    t_rd = cand
+                    break
+        if t_rd != 'outros':
+            tipos.append(t_rd); camadas.append('D_rd_email'); continue
+
+        # Camada E: outros (sem fonte boa)
+        tipos.append('outros'); camadas.append('E_outros')
+
+    n['_tipo'] = tipos
+    n['_camada'] = camadas
+
+    # Log de auditoria: cobertura por status + camada
+    log("  Atribuição de tipo — auditoria de cobertura:")
+    for status in ['Ganho', 'Perdido', 'Aberto']:
+        sub = n[n['Negócio - Status'] == status]
+        if len(sub) == 0: continue
+        classif = (sub['_tipo'] != 'outros').sum()
+        cob = classif / len(sub) * 100
+        log(f"    {status:<10} {classif:>6,}/{len(sub):<6} classificados ({cob:.1f}%)")
+    log("  Distribuição por camada:")
+    for cam, qtd in n['_camada'].value_counts().items():
+        log(f"    {cam:<14} {qtd:>6,}")
+
+    return n
 
 
 # ----------------------------------------------------------------------------
@@ -759,13 +856,9 @@ def normaliza_tipo_curso(curso) -> str:
 #     com fallback para "Negócio - Curso"
 #   - Atividades: herdam o tipo via Negócio - ID -> Negócios
 # ----------------------------------------------------------------------------
-def por_tipo_curso_mensal(rd, neg, ativ, grupo, atribuicao) -> list:
-    n = neg.copy()
-    # Coluna unificada de curso do negócio (preferencia: Produto de Interesse > Curso)
-    n["_curso_neg"] = n.get("Negócio - Produto de Interesse")
-    if "Negócio - Curso" in n.columns:
-        n["_curso_neg"] = n["_curso_neg"].fillna(n["Negócio - Curso"])
-    n["_tipo"] = n["_curso_neg"].apply(normaliza_tipo_curso)
+def por_tipo_curso_mensal(rd, neg_classificado, ativ, grupo, atribuicao) -> list:
+    """Espera neg_classificado já com colunas _tipo e _camada (de atribui_tipos_negocios)."""
+    n = neg_classificado
 
     if grupo == "Fundo":
         ganhos_ids = atribuicao["fundo"]["ganhos_neg_ids"]
@@ -1421,9 +1514,12 @@ def main():
     topo_por_curso_mensal = por_curso_mensal(rd, inv, "Topo")
     fundo_por_curso_mensal = por_curso_mensal(rd, inv, "Fundo")
 
+    log("Atribuindo tipo (MBA/Pós/Imersões) aos negócios — multi-camada...")
+    neg_classificado = atribui_tipos_negocios(neg, rd)
+
     log("Tipo × Mês (Reuniões/Matrículas/Faturamento por tipo de curso)...")
-    topo_por_tipo_mensal = por_tipo_curso_mensal(rd, neg, ativ, "Topo", atribuicao)
-    fundo_por_tipo_mensal = por_tipo_curso_mensal(rd, neg, ativ, "Fundo", atribuicao)
+    topo_por_tipo_mensal = por_tipo_curso_mensal(rd, neg_classificado, ativ, "Topo", atribuicao)
+    fundo_por_tipo_mensal = por_tipo_curso_mensal(rd, neg_classificado, ativ, "Fundo", atribuicao)
 
     log("Calculando funis (Topo e Fundo)...")
     topo_funil = funil_completo(rd, ativ, neg, "Topo", atribuicao)
