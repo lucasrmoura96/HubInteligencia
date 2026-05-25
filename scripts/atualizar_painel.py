@@ -1241,42 +1241,6 @@ def detalhamento_diario(rd, inv, neg, grupo, atribuicao) -> list:
 
 
 # ----------------------------------------------------------------------------
-# Performance Time (SDR e Closer)
-# ----------------------------------------------------------------------------
-def performance_time(ativ, neg) -> dict:
-    # SDR — atividades realizadas e qualificação
-    sdr_stats = ativ.groupby("Negócio - Proprietário SDR").agg(
-        atividades=("Atividade - ID", "count"),
-        concluidas=("Atividade - Concluído", lambda x: (x == "Concluído").sum()),
-    ).reset_index()
-    sdr_stats["taxa_conclusao"] = (sdr_stats["concluidas"] / sdr_stats["atividades"] * 100).round(1)
-    sdr_stats = sdr_stats.sort_values("atividades", ascending=False)
-
-    # Closer — negócios fechados e R$
-    closer_stats = neg.groupby("Negócio - Proprietário").agg(
-        negocios=("Negócio - ID", "count"),
-        ganhos=("Negócio - Status", lambda x: (x == "Ganho").sum()),
-        valor_ganho=("Negócio - Valor", lambda x: x[neg.loc[x.index, "Negócio - Status"] == "Ganho"].sum()),
-    ).reset_index()
-    closer_stats["taxa_fechamento"] = (closer_stats["ganhos"] / closer_stats["negocios"] * 100).round(1)
-    closer_stats = closer_stats.sort_values("valor_ganho", ascending=False)
-
-    return {
-        "sdr": [
-            {"nome": r["Negócio - Proprietário SDR"], "atividades": int(r["atividades"]),
-             "concluidas": int(r["concluidas"]), "taxa_conclusao": float(r["taxa_conclusao"])}
-            for _, r in sdr_stats.iterrows()
-        ],
-        "closer": [
-            {"nome": r["Negócio - Proprietário"], "negocios": int(r["negocios"]),
-             "ganhos": int(r["ganhos"]), "valor_ganho": round(float(r["valor_ganho"]), 2),
-             "taxa_fechamento": float(r["taxa_fechamento"])}
-            for _, r in closer_stats.iterrows()
-        ],
-    }
-
-
-# ----------------------------------------------------------------------------
 # Motivos de perda
 # ----------------------------------------------------------------------------
 def motivos_perda(neg) -> dict:

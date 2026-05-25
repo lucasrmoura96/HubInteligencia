@@ -446,12 +446,32 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 :root[data-theme="dark"] .btn-liquid.dark { --btn-fill: var(--gray-100); --btn-fill-fg: var(--gray-900); }
 
 .btn-liquid.locked {
-  cursor: not-allowed; opacity: 0.6;
+  cursor: not-allowed; opacity: 0.7;
   pointer-events: none;
 }
 .btn-liquid.locked .btn-icon::after {
   content: '◷';
   font-size: 0.9rem;
+}
+/* Pill "Em breve" — substitui o cadeado discreto por feedback claro */
+.btn-liquid .btn-coming {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-display);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--gray-200);
+  color: var(--text-muted);
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+:root[data-theme="dark"] .btn-liquid .btn-coming {
+  background: rgba(255,255,255,0.10);
+  color: rgba(255,255,255,0.65);
 }
 
 /* ============================================================
@@ -646,7 +666,9 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 
 .app-main {
   flex: 1; min-width: 0;
-  padding: var(--space-6) var(--space-6) var(--space-8);
+  /* padding-bottom extra (110px) garante que o Health widget flutuante (fixed bottom-right)
+     não cubra o último card/tabela da página ao rolar até o fim. */
+  padding: var(--space-6) var(--space-6) 110px;
 }
 @media (max-width: 720px) {
   .sidebar { width: 60px; }
@@ -1075,6 +1097,20 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
   letter-spacing: 0.08em;
   color: var(--text-muted);
 }
+/* Variante "estimado" — mostra quando Reuniões/CPR vêm de regra de 3 */
+.kpi-cell .kpi-label .kpi-tag.est {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
+  font-weight: 700;
+}
+:root[data-theme="dark"] .kpi-cell .kpi-label .kpi-tag.est {
+  background: rgba(179, 83, 9, 0.25);
+  color: #f0a253;
+}
+.kpi-cell.hero .kpi-label .kpi-tag.est {
+  background: rgba(255, 220, 150, 0.25);
+  color: #ffd089;
+}
 .kpi-cell .kpi-value {
   font-family: var(--font-display);
   font-size: clamp(0.95rem, 1.3vw, 1.3rem);
@@ -1169,7 +1205,16 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 .kpi-cell.featured-positive .kpi-value { color: var(--positive); }
 .kpi-cell.featured-accent { background: var(--accent-100); border-color: color-mix(in srgb, var(--accent-500) 25%, transparent); }
 .kpi-cell.featured-accent .kpi-value { color: var(--accent-500); }
+/* Dark mode — override pra não usar accent-100 (azul claro gritante no fundo preto) */
+:root[data-theme="dark"] .kpi-cell.featured-accent {
+  background: rgba(31, 91, 164, 0.18);
+  border-color: rgba(31, 91, 164, 0.35);
+}
 :root[data-theme="dark"] .kpi-cell.featured-accent .kpi-value { color: var(--accent-300); }
+:root[data-theme="dark"] .kpi-cell.featured-positive {
+  background: rgba(31, 181, 65, 0.15);
+  border-color: rgba(31, 181, 65, 0.35);
+}
 
 /* Hero card — taxas (L→MQL · MQL→Reu) — usa o mesmo grid 2-col do .kpi-sub */
 .kpi-cell.hero .kpi-sub .hero-rate-group { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }

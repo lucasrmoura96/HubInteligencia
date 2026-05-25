@@ -28,16 +28,13 @@ function cursoMatchTipo(curso, tipo) {
 
 const MESES_NOMES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
-// Formatação pt-BR completa — SEMPRE com separador de milhar e nunca abreviado
-const fmtN = (n) => (n == null ? '—' : Number(n).toLocaleString('pt-BR'));
-const fmtR$ = (n) => (n == null ? '—' : 'R$ ' + Number(n).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}));
-const fmtR$2 = (n) => (n == null ? '—' : 'R$ ' + Number(n).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}));
-const fmtPct = (n) => (n == null ? '—' : Number(n).toLocaleString('pt-BR', {minimumFractionDigits: 1, maximumFractionDigits: 1}) + '%');
-// Mantidas como alias sem abreviação (em caso de uso futuro)
-const fmtR$M = (n) => fmtR$2(n);
-const fmtR$K = (n) => fmtR$2(n);
-// Multiplicador (ROAS): "12,30x"
+// Formatação pt-BR — SEMPRE com separador de milhar, nunca abreviado
+const fmtN    = (n) => (n == null ? '—' : Number(n).toLocaleString('pt-BR'));
+const fmtR$2  = (n) => (n == null ? '—' : 'R$ ' + Number(n).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}));
+const fmtPct  = (n) => (n == null ? '—' : Number(n).toLocaleString('pt-BR', {minimumFractionDigits: 1, maximumFractionDigits: 1}) + '%');
 const fmtMult = (n) => (n == null ? '—' : Number(n).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + 'x');
+// Aliases legados (mantidos pra não quebrar usos antigos — não usar em código novo)
+const fmtR$ = fmtR$2, fmtR$M = fmtR$2, fmtR$K = fmtR$2;
 
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
@@ -154,9 +151,20 @@ async function loadData() {
 
 function renderHeader() {
   const upd = new Date(STATE.data.meta.atualizado_em);
-  document.getElementById('updateText').textContent =
-    upd.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-  // Aviso de não-classificados foi removido (item 5 dos ajustes finais)
+  let txt = upd.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+
+  // Aviso quando data_referencia (última data presente no RD) está defasada vs hoje real
+  // Detecta dados desatualizados sem precisar de monitoramento externo.
+  try {
+    const dataRef = parseDataRef(STATE.data.meta.data_referencia);
+    const hoje = new Date(); hoje.setHours(0,0,0,0);
+    const diffDias = Math.floor((hoje - dataRef) / (1000 * 60 * 60 * 24));
+    if (diffDias > 1) {
+      txt += ` · dados de ${diffDias} dia(s) atrás`;
+    }
+  } catch (e) { /* ignora */ }
+
+  document.getElementById('updateText').textContent = txt;
 }
 
 // ============================================================
@@ -729,19 +737,28 @@ function renderKPIs() {
 
   // Helper de comparativos: MoM + YoY centralizado abaixo do valor
   const cmp = (atualMoM, momVal, atualYoY, yoyVal, inverted = false) => {
+    // Sem contexto temporal (filtro = "Tudo", cross-filter ou tipo) → não mostra badges
+    // Evita o ruído visual de 12 cards exibindo "— sem comparativo".
+    if (!kAA && !kAAY) return '';
     const m = kAA  ? momBadge(atualMoM, momVal, inverted) : '';
     const y = kAAY ? yoyBadge(atualYoY, yoyVal, inverted) : '';
     if (m || y) return `<span class="kpi-cmp">${m}${y}</span>`;
-    // Sem comparativo disponível — placeholder discreto para manter altura consistente
+    // Placeholder discreto para manter altura consistente quando há contexto mas valor=null
     return `<span class="kpi-cmp"><span class="kpi-yoy flat">— sem comparativo</span></span>`;
   };
 
-  // Métricas para os heros adicionais (sempre que dispnível)
-  const reunioesTotal  = k.reunioes || 0;
-  const matriculasTotal = k.ganhos || 0;
+  // Métricas para os heros adicionais (preserva null pra exibir "—" em cross-filter
+  // ou filtro de tipo, onde não há breakdown de reuniões/ganhos)
+  const reunioesTotal  = (k.reunioes != null) ? k.reunioes : null;
+  const matriculasTotal = (k.ganhos != null) ? k.ganhos : null;
   const labelMatric    = isFundo ? 'Matrículas' : 'Participações em Venda';
   const subMatric      = isFundo ? 'vendas fechadas' : 'leads que passaram pelo Topo';
   const subReu         = isFundo ? 'Atividade tipo Reunião + Quali. OK' : 'reuniões com assistência do Topo';
+
+  // Reuniões e CPR são estimados via regra de 3 quando filtro de dia específico está ativo
+  // (série diária não traz reuniões, então usamos proporção mensal).
+  const isEstimado = STATE.filtro.dia !== 'all' && STATE.filtro.mes !== 'all' && STATE.filtro.ano !== 'all';
+  const estTag = isEstimado ? '<span class="kpi-tag est">≈ estimado</span>' : '';
 
   // 4 cards HERO (2x2): Leads · MQLs / Reuniões · Matrículas
   const heroes = `
@@ -762,7 +779,7 @@ function renderKPIs() {
         </span>
       </div>
       <div class="kpi-cell hero ${isFundo ? 'fundo' : 'topo'}">
-        <span class="kpi-label">${isFundo ? 'Reuniões Qualificadas' : 'Reuniões Assistidas'}</span>
+        <span class="kpi-label">${isFundo ? 'Reuniões Qualificadas' : 'Reuniões Assistidas'}${estTag}</span>
         <span class="kpi-value">${fmtN(reunioesTotal)}</span>
         ${cmp(reunioesTotal, kAA && kAA.reunioes, reunioesTotal, kAAY && kAAY.reunioes)}
         <span class="kpi-sub">${subReu}</span>
@@ -1061,8 +1078,15 @@ function chartCommonOpts(theme) {
 function renderSerieTemporal() {
   const tab = STATE.data[STATE.tab];
   let meses = tab.mensal;
-  if (STATE.filtro.ano !== 'all') meses = meses.filter(m => String(m.ano) === String(STATE.filtro.ano));
-  if (STATE.filtro.mes !== 'all') meses = meses.filter(m => String(m.mes) === String(STATE.filtro.mes));
+  // Estratégia: gráfico de tendência precisa de contexto histórico — ignora o filtro
+  // específico de MÊS (mostraria 1 barra só) mas respeita o filtro de ANO.
+  // Se ano específico: mostra esse ano inteiro. Se ano=all: últimos 12 meses.
+  if (STATE.filtro.ano !== 'all') {
+    meses = meses.filter(m => String(m.ano) === String(STATE.filtro.ano));
+  } else {
+    meses = meses.slice(-12);                      // últimos 12 meses como janela móvel
+  }
+  // OBS: não aplicamos filtro de mes/dia aqui (gráfico precisa de série, não ponto único)
 
   const ctx = document.getElementById('chartSerie').getContext('2d');
   if (chartSerie) chartSerie.destroy();
@@ -1181,10 +1205,20 @@ function renderFontes() {
   commonFontes.plugins.tooltip.titleFont = { family: 'JetBrains Mono, monospace', size: 13, weight: 600 };
   commonFontes.plugins.tooltip.bodyFont  = { family: 'JetBrains Mono, monospace', size: 14, weight: 500 };
 
+  // Abrevia labels longos para não cortar no eixo Y (ex: "Mecanismo de Busca" -> "Mec. Busca")
+  const abreviaFonte = (s) => {
+    const txt = String(s || '');
+    if (txt.length <= 14) return txt;
+    return txt
+      .replace(/Mecanismo de Busca/i, 'Mec. Busca')
+      .replace(/Desconhecido/i, 'Desconhec.')
+      .replace(/Whatsapp/i, 'WhatsApp');
+  };
+
   chartFontes = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: fontes.map(x => x.label),
+      labels: fontes.map(x => abreviaFonte(x.label)),
       datasets: [
         { label: 'Leads', data: fontes.map(x => x.leads), backgroundColor: c1 + '55', borderRadius: 4, barPercentage: 0.7 },
         { label: 'MQLs',  data: fontes.map(x => x.mqls),  backgroundColor: c1,        borderRadius: 4, barPercentage: 0.7 },
@@ -1815,6 +1849,11 @@ function setupExport() {
 // RENDER ALL
 // ============================================================
 function renderAll() {
+  // Guard: se loadData falhou (sem internet, JSON corrompido), evita cascata de erros
+  if (!STATE.data) {
+    console.warn('renderAll abortado — STATE.data ausente. Rode "Atualizar HUB MKT.bat".');
+    return;
+  }
   renderSelectionBanner();
   renderEmptyStateBanner();     // banner topo quando filtro retorna zero
   renderKPIs();
@@ -1836,8 +1875,18 @@ function renderEmptyStateBanner() {
   const hasFiltro = STATE.filtro.ano !== 'all' || STATE.filtro.mes !== 'all'
                  || STATE.filtro.dia !== 'all' || STATE.tipoCurso !== 'all';
   const zerado = (!k.leads && !k.mqls && !k.custo);
-  // Só dispara se houver filtro ativo + tudo zerado (não se selecao — esse já tem banner próprio)
+
+  let mensagem = null;
+
   if (!STATE.selecao && hasFiltro && zerado) {
+    // Caso 1: filtro vazio — sem registros para o recorte
+    mensagem = '<strong>Sem dados.</strong> Não há registros para este recorte de filtro. Ajuste o período ou o tipo de curso.';
+  } else if (!STATE.selecao && STATE.tipoCurso !== 'all') {
+    // Caso 2: tipo de curso ativo — financeiro zerado por design (sem breakdown por curso)
+    mensagem = '<strong>Filtro de tipo ativo.</strong> Reuniões, Matrículas, ROAS, Faturamento e CPA aparecem como "—" porque o cruzamento financeiro com tipo de curso ainda não é suportado pelo pipeline.';
+  }
+
+  if (mensagem) {
     if (!banner) {
       banner = document.createElement('div');
       banner.id = id;
@@ -1845,10 +1894,7 @@ function renderEmptyStateBanner() {
       const sb = document.getElementById('selectionBanner');
       sb.parentNode.insertBefore(banner, sb.nextSibling);
     }
-    banner.innerHTML = `
-      <strong>Sem dados.</strong>
-      Não há registros para este recorte de filtro. Ajuste o período ou o tipo de curso.
-    `;
+    banner.innerHTML = mensagem;
     banner.classList.remove('hidden');
   } else if (banner) {
     banner.classList.add('hidden');
