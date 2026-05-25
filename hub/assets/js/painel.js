@@ -242,6 +242,38 @@ function setupFiltros() {
 function clearPresets() { document.querySelectorAll('.preset').forEach(b => b.classList.remove('active')); }
 
 // ============================================================
+// FUNIL DE TOPO — Helper de filtro temporal
+// Retorna os 6 totais do funil de assistência respeitando ano/mês.
+// Contagem POR PESSOA ÚNICA (email) — definido pelo gestor da área.
+// ============================================================
+function calcFunilTopoFiltrado() {
+  const tab = STATE.data.topo;
+  const fa = tab.funil_assistencia;
+  if (!fa) return null;
+  const { ano, mes } = STATE.filtro;
+  // Sem filtro temporal → usa os totais agregados (mais preciso para o "geral")
+  if (ano === 'all' && mes === 'all') {
+    return { ...fa.totais };
+  }
+  // Filtra mensal e soma
+  let rows = fa.mensal || [];
+  if (ano !== 'all') rows = rows.filter(r => String(r.ano) === String(ano));
+  if (mes !== 'all') rows = rows.filter(r => String(r.mes) === String(mes));
+  return rows.reduce((a, r) => ({
+    leads_topo:          a.leads_topo + r.leads_topo,
+    mqls_topo:           a.mqls_topo + r.mqls_topo,
+    leads_fundo_assist:  a.leads_fundo_assist + r.leads_fundo_assist,
+    mqls_fundo_assist:   a.mqls_fundo_assist + r.mqls_fundo_assist,
+    reunioes_assist:     a.reunioes_assist + (r.reunioes_assist || 0),
+    vendas_assist:       a.vendas_assist + r.vendas_assist,
+    faturamento_assist:  a.faturamento_assist + r.faturamento_assist,
+  }), {
+    leads_topo: 0, mqls_topo: 0, leads_fundo_assist: 0, mqls_fundo_assist: 0,
+    reunioes_assist: 0, vendas_assist: 0, faturamento_assist: 0,
+  });
+}
+
+// ============================================================
 // CÁLCULO KPIs FILTRADOS
 // ============================================================
 function calcKpisFiltrados() {
@@ -343,6 +375,39 @@ function calcKpisFiltrados() {
     faturamento: a.faturamento + m.faturamento,
     reunioes: a.reunioes + m.reunioes_qualificadas,
   }), { leads:0, mqls:0, custo:0, ganhos:0, faturamento:0, reunioes:0 });
+
+  // ===========================================================
+  // TOPO: substitui leads/mqls/reuniões/ganhos/faturamento pelos
+  // valores do funil de ASSISTÊNCIA (pessoas únicas), mantendo custo.
+  // Fundo continua usando os valores agregados padrão.
+  // ===========================================================
+  if (STATE.tab === 'topo') {
+    const fa = calcFunilTopoFiltrado();
+    if (fa) {
+      const custoTopo = acc.custo;
+      return {
+        leads: fa.leads_topo,
+        mqls: fa.mqls_topo,
+        custo: custoTopo,
+        reunioes: fa.reunioes_assist,
+        ganhos: fa.vendas_assist,
+        faturamento: fa.faturamento_assist,
+        // Sub-métricas do funil (pra eventual uso no painel)
+        leads_fundo_assist: fa.leads_fundo_assist,
+        mqls_fundo_assist: fa.mqls_fundo_assist,
+        // Taxas calculadas sobre pessoas únicas
+        pct_mql: fa.leads_topo ? (fa.mqls_topo/fa.leads_topo*100) : 0,
+        pct_mql_reuniao: fa.mqls_topo ? (fa.reunioes_assist/fa.mqls_topo*100) : 0,
+        pct_reuniao_ganho: fa.reunioes_assist ? (fa.vendas_assist/fa.reunioes_assist*100) : 0,
+        cpl: fa.leads_topo ? (custoTopo/fa.leads_topo) : 0,
+        cpmql: fa.mqls_topo ? (custoTopo/fa.mqls_topo) : 0,
+        cpr: fa.reunioes_assist ? (custoTopo/fa.reunioes_assist) : 0,
+        ticket_medio: fa.vendas_assist ? (fa.faturamento_assist/fa.vendas_assist) : 0,
+        roas: custoTopo ? (fa.faturamento_assist/custoTopo) : 0,
+        cac: fa.vendas_assist ? (custoTopo/fa.vendas_assist) : 0,
+      };
+    }
+  }
 
   return {
     ...acc,
@@ -941,43 +1006,54 @@ function renderFunil() {
   const k = calcKpisFiltrados();
   const isFundo = STATE.tab === 'fundo';
 
-  // Conversões entre etapas
-  const conv_leads_mql  = k.leads ? (k.mqls / k.leads * 100) : 0;
-  const conv_mql_reu    = k.mqls ? (k.reunioes / k.mqls * 100) : 0;
-  const conv_reu_ganho  = k.reunioes ? (k.ganhos / k.reunioes * 100) : 0;
+  let funil;
+  let palette;
 
-  const funil = {
-    etapas: [
-      { etapa: 'Leads', valor: k.leads, conversao: null },
-      { etapa: 'MQLs', valor: k.mqls, conversao: conv_leads_mql },
-      {
-        etapa: isFundo ? 'Reuniões Qualificadas' : 'Reuniões Assistidas',
-        valor: k.reunioes || 0,
-        conversao: conv_mql_reu,
-      },
-      {
-        etapa: isFundo ? 'Ganhos' : 'Participações em Venda',
-        valor: k.ganhos || 0,
-        conversao: conv_reu_ganho,
-        faturamento: k.faturamento != null ? k.faturamento : null,
-      },
-    ],
-  };
+  if (isFundo) {
+    // FUNDO: 4 etapas tradicionais (Leads → MQLs → Reuniões Qualificadas → Ganhos)
+    const conv_leads_mql = k.leads ? (k.mqls / k.leads * 100) : 0;
+    const conv_mql_reu   = k.mqls ? (k.reunioes / k.mqls * 100) : 0;
+    const conv_reu_ganho = k.reunioes ? (k.ganhos / k.reunioes * 100) : 0;
+    funil = {
+      etapas: [
+        { etapa: 'Leads', valor: k.leads, conversao: null },
+        { etapa: 'MQLs', valor: k.mqls, conversao: conv_leads_mql },
+        { etapa: 'Reuniões Qualificadas', valor: k.reunioes || 0, conversao: conv_mql_reu },
+        { etapa: 'Ganhos', valor: k.ganhos || 0, conversao: conv_reu_ganho,
+          faturamento: k.faturamento != null ? k.faturamento : null },
+      ],
+    };
+    palette = ['#34cc5d', '#1fb541', '#137f2e', '#0a4519'];
 
-  document.getElementById('funilSecTitle').textContent = isFundo
-    ? 'Jornada · Captação → Venda'
-    : 'Jornada · Assistência do Topo';
-  document.getElementById('funilSecHint').textContent = isFundo
-    ? 'Leads → MQLs → Reuniões Qualificadas → Vendas'
-    : 'Leads → MQLs → Reuniões Assistidas → Participações em Venda';
+    document.getElementById('funilSecTitle').textContent = 'Jornada · Captação → Venda';
+    document.getElementById('funilSecHint').textContent = 'Leads → MQLs → Reuniões Qualificadas → Vendas';
+  } else {
+    // TOPO: 6 etapas de assistência (pessoas únicas por email)
+    // Usa calcFunilTopoFiltrado pra ter acesso aos sub-totais Leads/MQLs Fundo Assistidos
+    const fa = calcFunilTopoFiltrado() || {
+      leads_topo: 0, mqls_topo: 0, leads_fundo_assist: 0,
+      mqls_fundo_assist: 0, reunioes_assist: 0, vendas_assist: 0, faturamento_assist: 0
+    };
+    const conv = (a, b) => a ? (b / a * 100) : 0;
+    funil = {
+      etapas: [
+        { etapa: 'Leads · Topo',          valor: fa.leads_topo,         conversao: null },
+        { etapa: 'MQLs · Topo',           valor: fa.mqls_topo,          conversao: conv(fa.leads_topo, fa.mqls_topo) },
+        { etapa: 'Leads · Fundo (assist)', valor: fa.leads_fundo_assist, conversao: conv(fa.mqls_topo, fa.leads_fundo_assist) },
+        { etapa: 'MQLs · Fundo (assist)',  valor: fa.mqls_fundo_assist,  conversao: conv(fa.leads_fundo_assist, fa.mqls_fundo_assist) },
+        { etapa: 'Reuniões Assistidas',   valor: fa.reunioes_assist,    conversao: conv(fa.mqls_fundo_assist, fa.reunioes_assist) },
+        { etapa: 'Vendas Assistidas',     valor: fa.vendas_assist,      conversao: conv(fa.reunioes_assist, fa.vendas_assist),
+          faturamento: fa.faturamento_assist != null ? fa.faturamento_assist : null },
+      ],
+    };
+    palette = ['#6ca1df', '#3d7ec5', '#1f5ba4', '#143a6b', '#0b2138', '#07172a'];
+
+    document.getElementById('funilSecTitle').textContent = 'Jornada · Assistência do Topo';
+    document.getElementById('funilSecHint').textContent = 'pessoas únicas em cada etapa';
+  }
 
   const container = document.getElementById('funilContainer');
   container.className = `funnel-vert ${isFundo ? 'fundo' : 'topo'}`;
-
-  // Paleta degradê (verde escurecendo / azul escurecendo)
-  const palette = isFundo
-    ? ['#34cc5d', '#1fb541', '#137f2e', '#0a4519']
-    : ['#6ca1df', '#1f5ba4', '#143a6b', '#0b2138'];
 
   // Larguras 100% proporcionais ao volume (REAL).
   // Piso técnico de 8% só pra garantir que o card permaneça clicável/legível

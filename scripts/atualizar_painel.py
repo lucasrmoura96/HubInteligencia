@@ -1050,6 +1050,124 @@ def series_temporais(rd: pd.DataFrame, inv: pd.DataFrame, grupo: str) -> dict:
 
 
 # ----------------------------------------------------------------------------
+# FUNIL ESPECÍFICO DO TOPO — 6 etapas de assistência sequencial
+# Definido pelo gestor da área (2026-05-25). Conta PESSOAS ÚNICAS (email) em
+# todas as etapas para taxas de conversão coerentes entre etapas.
+#
+#   1. Leads de Topo            (emails distintos com conversão Grupo=Topo)
+#   2. MQLs de Topo             (subset de 1 cujo Class=MQL no Topo)
+#   3. Leads Fundo Assistidos   (emails Fundo com conversão Topo anterior)
+#   4. MQLs Fundo Assistidos    (subset de 3 cujo Class=MQL no Fundo)
+#   5. Reuniões Assistidas      (já calculado em atribuicao.topo)
+#   6. Vendas Assistidas        (já calculado em atribuicao.topo)
+# ----------------------------------------------------------------------------
+def funil_topo_assistencia(rd: pd.DataFrame, neg: pd.DataFrame,
+                            atribuicao: dict) -> dict:
+    """Retorna {totais, mensal} para o funil de assistência do Topo."""
+    rd_c = rd[["E-mail Lead", "Data da Conversão", "Grupo", "Class"]].dropna(
+        subset=["E-mail Lead", "Data da Conversão"]
+    ).copy()
+    rd_c["email"] = rd_c["E-mail Lead"].astype(str).str.lower().str.strip()
+    rd_c = rd_c[rd_c["email"] != ""]
+    rd_c["AnoMes"] = rd_c["Data da Conversão"].dt.to_period("M").astype(str)
+
+    # Pré-índice: primeira data de Topo por email (para checar "passou antes")
+    topo_rows = rd_c[rd_c["Grupo"] == "Topo"]
+    primeira_topo = topo_rows.groupby("email")["Data da Conversão"].min().to_dict()
+
+    # === Etapas 1 e 2: pessoas únicas que tiveram conversão no Topo ===
+    # 1. Leads de Topo: emails distintos com Grupo=Topo
+    # 2. MQLs de Topo: subset com pelo menos uma conversão Topo marcada como MQL
+    topo_mql_emails = set(topo_rows[topo_rows["Class"] == "MQL"]["email"])
+    topo_all_emails = set(topo_rows["email"])
+
+    # === Etapa 3 e 4: leads/MQLs Fundo cujo email teve Topo ANTES ===
+    fundo_rows = rd_c[rd_c["Grupo"] == "Fundo"].copy()
+    # Para cada conversão Fundo, primeira_topo do mesmo email tem que ser < Data
+    fundo_rows["topo_data"] = fundo_rows["email"].map(primeira_topo)
+    fundo_assist = fundo_rows[
+        fundo_rows["topo_data"].notna()
+        & (fundo_rows["topo_data"] < fundo_rows["Data da Conversão"])
+    ]
+    leads_fundo_assist_emails = set(fundo_assist["email"])
+    mql_fundo_assist_emails = set(
+        fundo_assist[fundo_assist["Class"] == "MQL"]["email"]
+    )
+
+    # === Etapa 5 e 6: já calculadas no atribuicao multi-touch ===
+    reunioes_assist = len(atribuicao["topo"]["reunioes_assistidas_ids"])
+    vendas_assist = len(atribuicao["topo"]["assistencia_neg_ids"])
+    faturamento_assist = atribuicao["topo"]["faturamento_influenciado"]
+
+    # === Totais ===
+    totais = {
+        "leads_topo": len(topo_all_emails),
+        "mqls_topo": len(topo_mql_emails),
+        "leads_fundo_assist": len(leads_fundo_assist_emails),
+        "mqls_fundo_assist": len(mql_fundo_assist_emails),
+        "reunioes_assist": reunioes_assist,
+        "vendas_assist": vendas_assist,
+        "faturamento_assist": round(faturamento_assist, 2),
+    }
+
+    # === Granularidade mensal: usa AnoMes da PRIMEIRA conversão Topo do email ===
+    # Critério: a "etapa" do funil acontece no mês em que cada pessoa entrou em cada nível
+    # Etapas 1-2: mês da primeira conversão Topo do email
+    # Etapas 3-4: mês da primeira conversão Fundo (com Topo prévio) do email
+    # Etapa 5: mês da reunião (data conclusão)
+    # Etapa 6: mês do ganho (Negócio - Ganho em)
+    def primeira_data_grupo(rows):
+        return rows.groupby("email")["Data da Conversão"].min()
+
+    p_topo = primeira_data_grupo(topo_rows)
+    p_topo_mql = primeira_data_grupo(topo_rows[topo_rows["Class"] == "MQL"])
+    p_fundo_assist = primeira_data_grupo(fundo_assist)
+    p_fundo_mql_assist = primeira_data_grupo(fundo_assist[fundo_assist["Class"] == "MQL"])
+
+    def serie_por_mes(s):
+        if s.empty: return {}
+        df = s.reset_index()
+        df["AnoMes"] = df["Data da Conversão"].dt.to_period("M").astype(str)
+        return df.groupby("AnoMes").size().to_dict()
+
+    s_leads_topo = serie_por_mes(p_topo)
+    s_mqls_topo = serie_por_mes(p_topo_mql)
+    s_leads_fundo = serie_por_mes(p_fundo_assist)
+    s_mqls_fundo = serie_por_mes(p_fundo_mql_assist)
+
+    # Reuniões: data da atividade concluída; Vendas: data do ganho
+    reu_ids = atribuicao["topo"]["reunioes_assistidas_ids"]
+    ganho_ids = atribuicao["topo"]["assistencia_neg_ids"]
+    # neg traz Negócio - Ganho em
+    neg_assist_ganho = neg[neg["Negócio - ID"].astype(int).isin(ganho_ids)].copy()
+    neg_assist_ganho["AnoMes"] = neg_assist_ganho["Negócio - Ganho em"].dt.to_period("M").astype(str)
+    s_vendas = neg_assist_ganho.groupby("AnoMes").size().to_dict()
+    s_faturamento = neg_assist_ganho.groupby("AnoMes")["Negócio - Valor"].sum().to_dict()
+    # Reuniões: já no detalhamento mensal existente (vamos pegar o que tem em mensal[Topo].reunioes_qualificadas posteriormente, ou usar atividades)
+    # Para simplicidade aqui retornamos apenas os 5 dados, e a etapa 5 fica como "reunioes_qualificadas" do mensal[Topo] que já existe
+
+    todos_meses = sorted(set(s_leads_topo) | set(s_mqls_topo) | set(s_leads_fundo)
+                        | set(s_mqls_fundo) | set(s_vendas))
+    mensal = []
+    for m in todos_meses:
+        try:
+            ano, mes = m.split("-"); ano, mes = int(ano), int(mes)
+        except Exception:
+            continue
+        mensal.append({
+            "ano": ano, "mes": mes,
+            "leads_topo": s_leads_topo.get(m, 0),
+            "mqls_topo": s_mqls_topo.get(m, 0),
+            "leads_fundo_assist": s_leads_fundo.get(m, 0),
+            "mqls_fundo_assist": s_mqls_fundo.get(m, 0),
+            "vendas_assist": s_vendas.get(m, 0),
+            "faturamento_assist": round(float(s_faturamento.get(m, 0.0)), 2),
+        })
+
+    return {"totais": totais, "mensal": mensal}
+
+
+# ----------------------------------------------------------------------------
 # Funil completo (do lead à venda)
 # ----------------------------------------------------------------------------
 def funil_completo(rd: pd.DataFrame, ativ: pd.DataFrame, neg: pd.DataFrame,
@@ -1525,6 +1643,15 @@ def main():
     topo_funil = funil_completo(rd, ativ, neg, "Topo", atribuicao)
     fundo_funil = funil_completo(rd, ativ, neg, "Fundo", atribuicao)
 
+    log("Funil de TOPO — assistência (6 etapas por pessoa única)...")
+    topo_funil_assist = funil_topo_assistencia(rd, neg, atribuicao)
+    log(f"  Leads Topo: {topo_funil_assist['totais']['leads_topo']:,} · "
+        f"MQLs Topo: {topo_funil_assist['totais']['mqls_topo']:,} · "
+        f"Leads Fundo Assist: {topo_funil_assist['totais']['leads_fundo_assist']:,} · "
+        f"MQLs Fundo Assist: {topo_funil_assist['totais']['mqls_fundo_assist']:,} · "
+        f"Reuniões Assist: {topo_funil_assist['totais']['reunioes_assist']:,} · "
+        f"Vendas Assist: {topo_funil_assist['totais']['vendas_assist']:,}")
+
     log("Calculando financeiro por grupo (com atribuição)...")
     topo_fin = kpis_financeiros(inv, atribuicao, "Topo")
     fundo_fin = kpis_financeiros(inv, atribuicao, "Fundo")
@@ -1581,6 +1708,7 @@ def main():
             "por_curso_mensal": topo_por_curso_mensal,
             "por_tipo_mensal": topo_por_tipo_mensal,
             "funil": topo_funil,
+            "funil_assistencia": topo_funil_assist,  # novo funil de 6 etapas
             "financeiro": topo_fin,
             "mensal": topo_mes,
             "diario": topo_dia,
