@@ -1246,6 +1246,93 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 .visao-toggle.origem .vt-dot { background: #fff; }
 
 /* ============================================================
+   LOGIN OVERLAY — acesso restrito por área (criptografia client-side)
+   ============================================================ */
+.hub-login-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: var(--bg, #0e0f11);
+  background-image: radial-gradient(circle at 30% 20%, rgba(31,181,65,0.10), transparent 55%);
+}
+.hub-login-card {
+  width: 100%; max-width: 380px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 36px 32px 28px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.35);
+  animation: msFadeIn 0.25s var(--ease-apple);
+}
+.hub-login-logo { height: 38px; width: auto; margin-bottom: 18px; opacity: 0.95; }
+.hub-login-area {
+  font-family: var(--font-display);
+  font-size: 0.68rem; font-weight: 700;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--brand-500); margin-bottom: 10px;
+}
+.hub-login-title {
+  font-family: var(--font-display);
+  font-size: 1.35rem; font-weight: 700;
+  color: var(--text); margin: 0 0 6px;
+}
+.hub-login-sub {
+  font-size: 0.85rem; color: var(--text-muted);
+  margin: 0 0 22px; line-height: 1.45;
+}
+.hub-login-field { position: relative; margin-bottom: 12px; }
+.hub-login-input,
+.hub-login-user {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  padding: 13px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  outline: none;
+  transition: border-color var(--t-base);
+  box-sizing: border-box;
+}
+/* só o campo de senha tem o "olho", então reserva espaço à direita */
+.hub-login-input { padding-right: 44px; }
+.hub-login-input:focus,
+.hub-login-user:focus { border-color: var(--brand-500); }
+.hub-login-eye {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--text-muted); padding: 6px; display: flex;
+  border-radius: 6px; transition: color var(--t-base);
+}
+.hub-login-eye:hover { color: var(--text); }
+.hub-login-err {
+  min-height: 18px; font-size: 0.8rem; font-weight: 600;
+  color: var(--negative); margin-bottom: 8px;
+}
+.hub-login-btn {
+  width: 100%;
+  font-family: var(--font-display);
+  font-size: 0.9rem; font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 13px;
+  background: var(--brand-500);
+  color: #fff; border: 0; border-radius: 10px;
+  cursor: pointer;
+  transition: opacity var(--t-base), transform var(--t-base);
+}
+.hub-login-btn:hover:not(:disabled) { opacity: 0.92; }
+.hub-login-btn:active:not(:disabled) { transform: scale(0.98); }
+.hub-login-btn:disabled { opacity: 0.6; cursor: wait; }
+.hub-login-back {
+  display: inline-block; margin-top: 18px;
+  font-size: 0.8rem; color: var(--text-muted);
+  text-decoration: none; transition: color var(--t-base);
+}
+.hub-login-back:hover { color: var(--text); }
+
+/* ============================================================
    BANNERS
    ============================================================ */
 .warn-banner {

@@ -76,5 +76,20 @@
   })();
 </script>
 
+<!-- Dados CIFRADOS da área + módulo de autenticação (gate de entrada) -->
+<script src="dados/performance_mkt_enc.js" onerror="console.warn('Rode Atualizar HUB MKT.bat')"></script>
+<script src="assets/js/auth.js"></script>
+<script>
+  // Gate de acesso: pede a senha da área ao entrar (cacheia na sessão).
+  // O menu fica oculto até desbloquear. Os dados sensíveis só existem cifrados.
+  (function() {
+    const main = document.querySelector('main');
+    if (main) main.style.visibility = 'hidden';
+    if (!window.HubAuth) { if (main) main.style.visibility = 'visible'; return; }
+    HubAuth.unlock({ key: 'mkt', varName: 'PAINEL_ENC_MKT', nome: 'Performance & Marketing' })
+      .then(() => { if (main) main.style.visibility = 'visible'; });
+  })();
+</script>
+
 </body>
 </html>

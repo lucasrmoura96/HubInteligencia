@@ -265,13 +265,31 @@ function setupTheme() {
 // DATA LOAD
 // ============================================================
 async function loadData() {
+  // Modo legado (texto puro) — só se existir window.PAINEL_DATA (não usado em produção cifrada)
   if (window.PAINEL_DATA) { STATE.data = window.PAINEL_DATA; return true; }
+
+  // Modo cifrado: pede a senha da área e descriptografa no navegador (Web Crypto)
+  if (window.PAINEL_ENC_MKT && window.HubAuth) {
+    try {
+      STATE.data = await HubAuth.unlock({
+        key: 'mkt',
+        varName: 'PAINEL_ENC_MKT',
+        nome: 'Performance & Marketing',
+      });
+      return true;
+    } catch (e) {
+      console.error('Falha ao descriptografar:', e);
+      return false;
+    }
+  }
+
+  // Fallback (dev): tenta o JSON em texto puro local
   try {
     const res = await fetch('dados/performance_mkt.json');
     STATE.data = await res.json();
     return true;
   } catch (e) {
-    toast('Dados não encontrados. Rode scripts/ATUALIZAR.bat', 'error');
+    toast('Dados não encontrados. Rode "Atualizar HUB MKT.bat"', 'error');
     return false;
   }
 }

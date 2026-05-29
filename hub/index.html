@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HUB de Inteligência · Agroadvance</title>
   <link rel="stylesheet" href="assets/css/theme.css" />
-  <script src="dados/performance_mkt.js" onerror="console.warn('Rode scripts/ATUALIZAR.bat')"></script>
 </head>
 <body>
 
@@ -69,15 +68,16 @@
       localStorage.setItem('hub-theme', next);
     });
   })();
-  // Última atualização
+  // Última atualização — lê o meta PÚBLICO (não sensível: só data)
   (function() {
-    if (window.PAINEL_DATA) {
-      const upd = new Date(window.PAINEL_DATA.meta.atualizado_em);
-      document.getElementById('updateText').textContent =
-        'Atualizado em ' + upd.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-    } else {
-      document.getElementById('updateText').textContent = 'Sem dados. Rode scripts/ATUALIZAR.bat';
-    }
+    const el = document.getElementById('updateText');
+    fetch('dados/ultima_atualizacao.json', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(meta => {
+        const upd = new Date(meta.atualizado_em);
+        el.textContent = 'Atualizado em ' + upd.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+      })
+      .catch(() => { el.textContent = 'HUB de Inteligência'; });
   })();
 </script>
 

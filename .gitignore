@@ -44,3 +44,16 @@ desktop.ini
 .env
 *.key
 credentials.json
+
+# =========================================================
+# SEGURANÇA — dados em texto puro NÃO vão pro deploy
+# Só o arquivo CIFRADO (performance_mkt_enc.js) é publicado.
+# =========================================================
+# Senhas/usuários — JAMAIS commitar (só os .example vão pro git)
+senhas.local.json
+usuarios.local.json
+
+# Dados em texto puro (entrada da cifragem) — ficam só na máquina local
+hub/dados/performance_mkt.json
+hub/dados/performance_mkt.js
+# (ultima_atualizacao.json continua público — só tem data, nada sensível)
