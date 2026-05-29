@@ -14,6 +14,7 @@ const STATE = {
   selecao: null,
   busca: { ranking: '', tabela: '', cursos: '' },
   sortTabela: { col: 'leads', dir: 'desc' },
+  sortHier: { col: 'leads', dir: 'desc' },   // ordenação da Galeria de Criativos
 };
 
 // ============================================================
@@ -1597,7 +1598,7 @@ function renderFunil() {
 // ============================================================
 // GRÁFICOS — Tema custom Atlas
 // ============================================================
-let chartSerie = null, chartFontes = null;
+let chartSerie = null, chartFontes = null, chartMqlDiario = null;
 
 function chartTheme() {
   return {
@@ -1718,6 +1719,189 @@ function renderSerieTemporal() {
   document.getElementById('chartSerieTitle').textContent = STATE.selecao
     ? 'Período (global · não filtrado)'
     : 'Volume vs. Investimento';
+}
+
+// ============================================================
+// MQLs POR DIA — barras (MQLs) + linha (%MQL = MQL÷Leads)
+// Respeita Data/Range + Curso + Tipo
+// ============================================================
+// Agrega a série diária respeitando TODOS os filtros (datas, curso, tipo).
+// Retorna [{data:'YYYY-MM-DD', leads, mqls}] ordenado por data.
+function getDiarioFiltrado() {
+  const tab = STATE.data[STATE.tab];
+  const temCurso = STATE.cursos && STATE.cursos.length;
+  const temTipo = STATE.tipoCurso !== 'all';
+
+  let linhas;
+  if (temCurso || temTipo) {
+    // Precisa do breakdown por curso (por_curso_diario)
+    const diarioCurso = tab.por_curso_diario || [];
+    const acc = new Map();
+    for (const r of diarioCurso) {
+      if (!cursoAtivo(r.curso)) continue;
+      if (!cursoMatchTipo(r.curso, STATE.tipoCurso)) continue;
+      if (!dataIsoAtiva(r.data)) continue;
+      let A = acc.get(r.data);
+      if (!A) { A = { leads: 0, mqls: 0 }; acc.set(r.data, A); }
+      A.leads += r.leads || 0;
+      A.mqls  += r.mqls  || 0;
+    }
+    linhas = Array.from(acc, ([data, v]) => ({ data, leads: v.leads, mqls: v.mqls }));
+  } else {
+    // Série diária global (mais barata)
+    linhas = (tab.diario || [])
+      .filter(d => dataIsoAtiva(d.data))
+      .map(d => ({ data: d.data, leads: d.leads, mqls: d.mqls }));
+  }
+
+  linhas.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
+  return linhas;
+}
+
+function renderMqlDiario() {
+  const canvas = document.getElementById('chartMqlDiario');
+  if (!canvas) return;
+
+  const linhas = getDiarioFiltrado();
+  const inner = document.getElementById('mqlDiarioInner');
+  const scroll = document.getElementById('mqlDiarioScroll');
+
+  const theme = chartTheme();
+  const isFundo = STATE.tab === 'fundo';
+  const colorBar  = isFundo ? theme.brand : theme.accent;
+  const colorLine = theme.sand;
+
+  const labels = linhas.map(l => { const [, m, d] = l.data.split('-'); return `${d}/${m}`; });
+  const mqls = linhas.map(l => l.mqls);
+  const pct  = linhas.map(l => (l.leads ? Number((l.mqls / l.leads * 100).toFixed(1)) : 0));
+
+  // Mostra os rótulos de % na linha quando há espaço (<=120 dias).
+  // Com labels, dá mais largura por dia (30px) pra não sobrepor.
+  const mostrarLabels = linhas.length <= 120;
+  const perDay = mostrarLabels ? 30 : 16;
+  const minW = Math.max(linhas.length * perDay, 600);
+  if (inner) inner.style.minWidth = minW + 'px';
+
+  const ctx = canvas.getContext('2d');
+  if (chartMqlDiario) chartMqlDiario.destroy();
+
+  // Plugin inline: desenha o % acima de cada ponto da linha
+  const pctLabelPlugin = {
+    id: 'pctLabels',
+    afterDatasetsDraw(chart) {
+      if (!mostrarLabels) return;
+      const meta = chart.getDatasetMeta(1); // dataset 1 = linha %MQL
+      if (!meta || meta.hidden) return;
+      const c = chart.ctx;
+      c.save();
+      c.font = '700 12px "JetBrains Mono", monospace';
+      c.textAlign = 'center';
+      c.textBaseline = 'bottom';
+      meta.data.forEach((pt, i) => {
+        const v = pct[i];
+        if (v == null) return;
+        const txt = Math.round(v) + '%';
+        // contorno claro pra legibilidade sobre barras
+        c.lineWidth = 3;
+        c.strokeStyle = cssVar('--surface');
+        c.strokeText(txt, pt.x, pt.y - 8);
+        c.fillStyle = colorLine;
+        c.fillText(txt, pt.x, pt.y - 8);
+      });
+      c.restore();
+    },
+  };
+
+  const common = chartCommonOpts(theme);
+  // Tooltip HTML customizado (o nativo ficava preto/vazio). Garante texto
+  // visível e cores por linha: Leads em laranja (cor da linha), MQLs em verde (cor da barra).
+  common.plugins.tooltip.enabled = false;
+  common.plugins.tooltip.external = (context) => {
+    const { chart, tooltip } = context;
+    let el = document.getElementById('mqlTooltip');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'mqlTooltip';
+      el.className = 'mql-tooltip';
+      document.body.appendChild(el);
+    }
+    if (!tooltip || tooltip.opacity === 0 || !tooltip.dataPoints || !tooltip.dataPoints.length) {
+      el.style.opacity = '0';
+      return;
+    }
+    const idx = tooltip.dataPoints[0].dataIndex;
+    const l = linhas[idx];
+    if (!l) { el.style.opacity = '0'; return; }
+    const p = l.leads ? (l.mqls / l.leads * 100) : 0;
+    const [y, m, d] = l.data.split('-');
+    el.innerHTML = `
+      <div class="mqt-title">${d}/${m}/${y}</div>
+      <div class="mqt-row mqt-pct"><span>%MQL</span><b>${fmtPct(p)}</b></div>
+      <div class="mqt-row" style="color:${colorLine}"><span>Leads</span><b>${fmtN(l.leads)}</b></div>
+      <div class="mqt-row" style="color:${colorBar}"><span>MQLs</span><b>${fmtN(l.mqls)}</b></div>
+    `;
+    const rect = chart.canvas.getBoundingClientRect();
+    // Ancora no ponto MAIS ALTO entre barra/linha desse dia → balão sempre acima,
+    // nunca cobrindo o dado.
+    const ys = tooltip.dataPoints.map(dp => (dp.element ? dp.element.y : tooltip.caretY));
+    const topY = Math.min.apply(null, ys);
+    el.style.opacity = '1';
+    el.style.left = (rect.left + window.scrollX + tooltip.caretX) + 'px';
+    el.style.top  = (rect.top  + window.scrollY + topY) + 'px';
+  };
+
+  chartMqlDiario = new Chart(ctx, {
+    type: 'bar',
+    plugins: [pctLabelPlugin],
+    data: {
+      labels,
+      datasets: [
+        { label: 'MQLs', data: mqls, backgroundColor: colorBar, borderRadius: 3,
+          yAxisID: 'y', barPercentage: 0.72, categoryPercentage: 0.85, order: 2 },
+        { label: '%MQL (MQL÷Leads)', data: pct, type: 'line',
+          borderColor: colorLine, backgroundColor: colorLine + '22',
+          borderWidth: 2.5, tension: 0.3, fill: false, yAxisID: 'y1', order: 1,
+          pointRadius: mostrarLabels ? 2 : 0, pointBackgroundColor: colorLine, pointHoverRadius: 4 },
+      ],
+    },
+    options: {
+      ...common,
+      layout: { padding: { top: mostrarLabels ? 20 : 6 } },
+      scales: {
+        x: {
+          grid: { display: false }, border: { display: false },
+          ticks: { color: theme.text, font: { family: 'JetBrains Mono, monospace', size: 14, weight: 500 },
+                   maxRotation: 90, minRotation: 60, autoSkip: linhas.length > 62 },
+        },
+        y: {
+          position: 'left', beginAtZero: true,
+          grid: { color: theme.grid, drawTicks: false }, border: { display: false },
+          ticks: { color: theme.text, font: { family: 'JetBrains Mono, monospace', size: 12 }, callback: v => v.toLocaleString('pt-BR') },
+          title: { display: true, text: 'MQLs', color: theme.text, font: { family: 'JetBrains Mono, monospace', size: 11, weight: 600 } },
+        },
+        y1: {
+          position: 'right', beginAtZero: true, suggestedMax: 100,
+          grid: { display: false }, border: { display: false },
+          ticks: { color: theme.text, font: { family: 'JetBrains Mono, monospace', size: 12 }, callback: v => v + '%' },
+          title: { display: true, text: '%MQL', color: theme.text, font: { family: 'JetBrains Mono, monospace', size: 11, weight: 600 } },
+        },
+      },
+    },
+  });
+
+  // Auto-scroll pro fim (dias mais recentes) quando há muitos dias
+  if (scroll && linhas.length > 31) {
+    requestAnimationFrame(() => { scroll.scrollLeft = scroll.scrollWidth; });
+  }
+
+  // Hint e título
+  const totalMqls = mqls.reduce((a, b) => a + b, 0);
+  const totalLeads = linhas.reduce((a, l) => a + l.leads, 0);
+  const pctGeral = totalLeads ? (totalMqls / totalLeads * 100) : 0;
+  const hint = document.getElementById('mqlDiarioHint');
+  if (hint) hint.textContent = `${linhas.length} dias · ${fmtN(totalMqls)} MQLs · ${fmtPct(pctGeral)} médio · ${labelPeriodoAtual()}`;
+  const titulo = document.getElementById('mqlDiarioTitle');
+  if (titulo) titulo.textContent = isFundo ? 'MQLs por dia · Fundo' : 'MQLs por dia · Topo';
 }
 
 function renderFontes() {
@@ -2197,10 +2381,23 @@ const TABLE_STATE = {
   abertos: { curso: new Set(), campanha: new Set(), canal: new Set() },
 };
 
+// Ordena um array de linhas (curso/campanha/fonte/criativo) pela coluna ativa da Galeria
+function ordenarHier(arr) {
+  const { col, dir } = STATE.sortHier;
+  const mult = dir === 'asc' ? 1 : -1;
+  return arr.slice().sort((a, b) => {
+    const va = a[col] != null ? a[col] : 0;
+    const vb = b[col] != null ? b[col] : 0;
+    if (va < vb) return -1 * mult;
+    if (va > vb) return  1 * mult;
+    return (b.leads || 0) - (a.leads || 0); // desempate sempre por leads desc
+  });
+}
+
 function renderTabelaHierarquica() {
   const tab = STATE.data[STATE.tab];
-  // Cursos filtrados pelo período (era tab.por_curso_real - global)
-  let cursosBase = getPorCursoRealFiltrado().slice().sort((a, b) => b.leads - a.leads);
+  // Cursos filtrados pelo período, ordenados pela coluna ativa
+  let cursosBase = ordenarHier(getPorCursoRealFiltrado());
   // Filtro por tipo de curso
   if (STATE.tipoCurso !== 'all') {
     cursosBase = cursosBase.filter(c => cursoMatchTipo(c.curso, STATE.tipoCurso));
@@ -2242,14 +2439,20 @@ function renderTabelaHierarquica() {
 
   const cursos = cursosBase.filter(matchCurso);
 
+  const setaSort = (col) => {
+    if (STATE.sortHier.col !== col) return '<span class="sort-arrow">⇅</span>';
+    return STATE.sortHier.dir === 'asc'
+      ? '<span class="sort-arrow active">↑</span>'
+      : '<span class="sort-arrow active">↓</span>';
+  };
   const headerHtml = `
     <div class="hier-header">
       <span></span>
       <span>Curso · Campanha · Canal · Criativo</span>
-      <span class="hh-num">Leads</span>
-      <span class="hh-num">MQLs</span>
-      <span class="hh-num">% MQL</span>
-      <span class="hh-num col-custo">Custo</span>
+      <span class="hh-num sortable${STATE.sortHier.col==='leads'?' sorted':''}" data-sortcol="leads">Leads ${setaSort('leads')}</span>
+      <span class="hh-num sortable${STATE.sortHier.col==='mqls'?' sorted':''}" data-sortcol="mqls">MQLs ${setaSort('mqls')}</span>
+      <span class="hh-num sortable${STATE.sortHier.col==='pct_mql'?' sorted':''}" data-sortcol="pct_mql">% MQL ${setaSort('pct_mql')}</span>
+      <span class="hh-num col-custo sortable${STATE.sortHier.col==='custo'?' sorted':''}" data-sortcol="custo">Custo ${setaSort('custo')}</span>
     </div>
   `;
 
@@ -2293,7 +2496,7 @@ function renderTabelaHierarquica() {
           `;
 
           if (campOpen) {
-            (camp.fontes || []).forEach(f => {
+            ordenarHier(camp.fontes || []).forEach(f => {
               const canalKey = `${camp.campanha}::${f.fonte}`;
               const canalOpen = TABLE_STATE.abertos.canal.has(canalKey);
               const fpCls = pctClass(f.pct_mql);
@@ -2310,7 +2513,7 @@ function renderTabelaHierarquica() {
               `;
 
               if (canalOpen) {
-                const cris = f.criativos || [];
+                const cris = ordenarHier(f.criativos || []);
                 if (!cris.length) {
                   body += `<div class="hier-row level-4 no-expand"><span class="hier-expand"></span><span class="hier-name" style="opacity:0.5;">— sem criativos identificados nas UTMs —</span><span></span><span></span><span></span><span class="col-custo"></span></div>`;
                 } else {
@@ -2342,7 +2545,21 @@ function renderTabelaHierarquica() {
 
   document.getElementById('hierTable').innerHTML = headerHtml + body;
   document.getElementById('tabelaFooter').textContent =
-    `${cursos.length} de ${cursosBase.length} cursos${q ? ` · busca: "${STATE.busca.tabela}"` : ''} · clique para expandir`;
+    `${cursos.length} de ${cursosBase.length} cursos${q ? ` · busca: "${STATE.busca.tabela}"` : ''} · clique para expandir · clique no cabeçalho para ordenar`;
+
+  // Bind ordenação dos cabeçalhos
+  document.querySelectorAll('.hier-header .sortable').forEach(h => {
+    h.addEventListener('click', () => {
+      const col = h.dataset.sortcol;
+      if (STATE.sortHier.col === col) {
+        STATE.sortHier.dir = STATE.sortHier.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        STATE.sortHier.col = col;
+        STATE.sortHier.dir = 'desc';
+      }
+      renderTabelaHierarquica();
+    });
+  });
 
   // Bind handlers
   document.querySelectorAll('.hier-row[data-action]').forEach(row => {
@@ -2373,9 +2590,9 @@ function renderTabelaHierarquica() {
 }
 
 function campanhasDoCurso(cursoNome) {
-  return getTodasCampanhasFiltradas()
-    .filter(c => (c.cursos || []).includes(cursoNome))
-    .sort((a, b) => b.leads - a.leads);
+  return ordenarHier(
+    getTodasCampanhasFiltradas().filter(c => (c.cursos || []).includes(cursoNome))
+  );
 }
 
 function renderTabelaCampanhas() {
@@ -2618,6 +2835,7 @@ function renderAll() {
   renderCanaisPagos();          // canais Meta/Google/LinkedIn ao lado do funil
   renderRanking();
   renderTabelaHierarquica();
+  renderMqlDiario();            // painel MQLs por dia (barras + linha %MQL)
   renderHealthWidget();
 }
 

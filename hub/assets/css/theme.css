@@ -1054,6 +1054,69 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 }
 .range-clear:hover { color: var(--negative); border-color: var(--negative); }
 
+/* ============================================================
+   PAINEL MQLs POR DIA — barras + linha %MQL, scroll horizontal
+   ============================================================ */
+.diario-chart-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+}
+.diario-chart-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.diario-chart-scroll::-webkit-scrollbar { height: 8px; }
+.diario-chart-scroll::-webkit-scrollbar-track { background: var(--surface-2); border-radius: 4px; }
+.diario-chart-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+.diario-chart-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+.diario-chart-inner {
+  position: relative;
+  height: 360px;
+  min-width: 100%;
+}
+.diario-chart-inner canvas { display: block; }
+
+/* Tooltip HTML customizado do gráfico MQLs/dia */
+.mql-tooltip {
+  position: absolute;
+  pointer-events: none;
+  z-index: 3000;
+  background: var(--ink-900, #15171a);
+  color: var(--paper, #fff);
+  border-radius: 8px;
+  padding: 10px 13px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.30);
+  transform: translate(-50%, calc(-100% - 14px));
+  transition: opacity 0.12s var(--ease-apple);
+  white-space: nowrap;
+  opacity: 0;
+}
+.mql-tooltip .mqt-title {
+  font-weight: 700;
+  font-size: 12px;
+  opacity: 0.7;
+  margin-bottom: 7px;
+  letter-spacing: 0.04em;
+}
+.mql-tooltip .mqt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+.mql-tooltip .mqt-row span { opacity: 0.85; }
+.mql-tooltip .mqt-row b { font-weight: 700; }
+.mql-tooltip .mqt-pct {
+  font-size: 15px;
+  margin-bottom: 4px;
+  color: var(--paper, #fff);
+}
+
 .preset {
   font-family: var(--font-display);
   font-size: 0.72rem;
@@ -2564,6 +2627,23 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
   position: sticky; top: 0; z-index: 2;
 }
 .hier-header .hh-num { text-align: right; }
+
+/* Cabeçalhos ordenáveis da Galeria */
+.hier-header .sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--t-base);
+  white-space: nowrap;
+}
+.hier-header .sortable:hover { color: var(--text); }
+.hier-header .sortable.sorted { color: var(--text); }
+.hier-header .sort-arrow {
+  display: inline-block;
+  margin-left: 2px;
+  font-size: 0.9em;
+  opacity: 0.35;
+}
+.hier-header .sort-arrow.active { opacity: 1; color: var(--brand-500); }
 
 /* Viewport estreito: esconde coluna Custo (a mais à direita) */
 @media (max-width: 720px) {

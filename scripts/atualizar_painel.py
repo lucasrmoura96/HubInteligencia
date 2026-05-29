@@ -971,6 +971,39 @@ def por_curso_mensal(rd: pd.DataFrame, inv: pd.DataFrame, grupo: str) -> list:
     return out
 
 
+def por_curso_diario(rd: pd.DataFrame, grupo: str) -> list:
+    """Para cada DIA × curso: leads e mqls.
+
+    Estrutura: [{data: 'YYYY-MM-DD', curso, leads, mqls}, ...]
+    Usado pelo painel 'MQLs por dia' para filtrar diariamente respeitando
+    Curso/Tipo (a série `diario` global não tem dimensão de curso).
+    Só inclui linhas com pelo menos 1 lead (groupby já garante isso),
+    mantendo o JSON enxuto.
+    """
+    rd_g = rd[rd["Grupo"] == grupo].copy()
+    rd_g["DataStr"] = rd_g["Data da Conversão"].dt.strftime("%Y-%m-%d")
+
+    agg = rd_g.groupby(["DataStr", "Curso"]).agg(
+        leads=("Index", "count"),
+        mqls=("Class", lambda x: (x == "MQL").sum()),
+    ).reset_index()
+
+    out = []
+    for _, r in agg.iterrows():
+        curso = r["Curso"]
+        if pd.isna(curso) or not str(curso).strip():
+            continue
+        if pd.isna(r["DataStr"]):
+            continue
+        out.append({
+            "data": r["DataStr"],
+            "curso": str(curso),
+            "leads": int(r["leads"]),
+            "mqls": int(r["mqls"]),
+        })
+    return out
+
+
 # ----------------------------------------------------------------------------
 # Conversões RD com Grupo NULL (corrige C6 da auditoria — antes silencioso)
 # ----------------------------------------------------------------------------
@@ -1772,6 +1805,10 @@ def main():
     topo_por_curso_mensal = por_curso_mensal(rd, inv, "Topo")
     fundo_por_curso_mensal = por_curso_mensal(rd, inv, "Fundo")
 
+    log("Curso × Dia (painel MQLs diário filtrável)...")
+    topo_por_curso_diario = por_curso_diario(rd, "Topo")
+    fundo_por_curso_diario = por_curso_diario(rd, "Fundo")
+
     log("Atribuindo tipo (MBA/Pós/Imersões) aos negócios — multi-camada...")
     neg_classificado = atribui_tipos_negocios(neg, rd)
 
@@ -1850,6 +1887,7 @@ def main():
             "todas_campanhas": topo_todas,
             "por_curso_real": topo_por_curso_real,
             "por_curso_mensal": topo_por_curso_mensal,
+            "por_curso_diario": topo_por_curso_diario,
             "por_tipo_mensal": topo_por_tipo_mensal,
             "funil": topo_funil,
             "funil_assistencia": topo_funil_assist,  # novo funil de 6 etapas
@@ -1870,6 +1908,7 @@ def main():
             "todas_campanhas": fundo_todas,
             "por_curso_real": fundo_por_curso_real,
             "por_curso_mensal": fundo_por_curso_mensal,
+            "por_curso_diario": fundo_por_curso_diario,
             "por_tipo_mensal": fundo_por_tipo_mensal,
             "funil": fundo_funil,
             "financeiro": fundo_fin,
