@@ -1845,6 +1845,18 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
   .grid-funil-canais { grid-template-columns: 1fr; }
 }
 
+/* Cada coluna é flex-column para o card preencher toda a altura da linha,
+   alinhando funil e canais pagos (mesmo topo e mesmo rodapé) */
+.fc-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.fc-col > .funnel-vert,
+.fc-col > .canais-pagos {
+  flex: 1 1 auto;   /* preenchem a altura igual da linha */
+}
+
 .funnel-vert {
   display: flex; flex-direction: column;
   align-items: center;
