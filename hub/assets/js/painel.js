@@ -5,12 +5,137 @@
 const STATE = {
   data: null,
   tab: 'fundo',
-  filtro: { ano: 'all', mes: 'all', dia: 'all' },
+  // filtro.mes e filtro.dia aceitam: 'all' OU Array<string> (multi-select com checkboxes).
+  // filtro.ano segue como string única ('all' ou ano).
+  // filtro.range: quando setado ({ de: 'YYYY-MM-DD', ate: 'YYYY-MM-DD' }), substitui ano/mes/dia.
+  filtro: { ano: 'all', mes: 'all', dia: 'all', range: null },
   tipoCurso: 'all',         // all | mba | pos | imersoes
+  cursos: [],               // multi-select de cursos específicos; vazio = todos
   selecao: null,
   busca: { ranking: '', tabela: '', cursos: '' },
   sortTabela: { col: 'leads', dir: 'desc' },
 };
+
+// ============================================================
+// HELPERS DE MATCH DE FILTRO
+// Aceitam 'all' (string) ou Array<string>. Centralizam toda
+// a lógica de "esse valor está dentro do filtro selecionado?"
+// ============================================================
+function anoAtivo(ano) {
+  const f = STATE.filtro.ano;
+  return f === 'all' || String(f) === String(ano);
+}
+function mesAtivo(mes) {
+  const f = STATE.filtro.mes;
+  if (f === 'all' || (Array.isArray(f) && f.length === 0)) return true;
+  if (Array.isArray(f)) return f.map(String).includes(String(mes));
+  return String(f) === String(mes);
+}
+function diaAtivo(dia) {
+  const f = STATE.filtro.dia;
+  if (f === 'all' || (Array.isArray(f) && f.length === 0)) return true;
+  if (Array.isArray(f)) return f.map(String).includes(String(dia));
+  return String(f) === String(dia);
+}
+function cursoAtivo(curso) {
+  if (!STATE.cursos || STATE.cursos.length === 0) return true;
+  return STATE.cursos.includes(String(curso));
+}
+// True se NENHUM filtro temporal está ativo (caminho rápido nos agregados globais)
+function nenhumFiltroTemporal() {
+  const f = STATE.filtro;
+  if (f.range) return false;
+  const mesAll = f.mes === 'all' || (Array.isArray(f.mes) && f.mes.length === 0);
+  const diaAll = f.dia === 'all' || (Array.isArray(f.dia) && f.dia.length === 0);
+  return f.ano === 'all' && mesAll && diaAll;
+}
+
+// Converte 'YYYY-MM-DD' para inteiro YYYYMMDD (para comparação rápida)
+function dataParaNum(s) {
+  const [y, m, d] = String(s).split('-').map(Number);
+  return y * 10000 + m * 100 + d;
+}
+
+// Match de tupla (ano, mes, [dia]) considerando range customizado quando setado.
+// Quando range NÃO está ativo, usa os helpers normais.
+function tupleAtivo(ano, mes, dia = null) {
+  const r = STATE.filtro.range;
+  if (r) {
+    const deN  = r.deNum  || dataParaNum(r.de);
+    const ateN = r.ateNum || dataParaNum(r.ate);
+    if (dia != null) {
+      // Linha tem granularidade DIÁRIA → match exato
+      return (ano * 10000 + parseInt(mes, 10) * 100 + parseInt(dia, 10)) >= deN
+          && (ano * 10000 + parseInt(mes, 10) * 100 + parseInt(dia, 10)) <= ateN;
+    } else {
+      // Linha tem granularidade MENSAL → checa se o mês overlapa o range
+      const m = parseInt(mes, 10);
+      const lastDay = new Date(ano, m, 0).getDate();
+      const monthStart = ano * 10000 + m * 100 + 1;
+      const monthEnd   = ano * 10000 + m * 100 + lastDay;
+      return monthEnd >= deN && monthStart <= ateN;
+    }
+  }
+  return anoAtivo(ano) && mesAtivo(mes) && (dia == null || diaAtivo(dia));
+}
+
+// Match de uma string ISO 'YYYY-MM-DD' (usado pela série diária)
+function dataIsoAtiva(isoStr) {
+  if (!isoStr) return false;
+  const r = STATE.filtro.range;
+  if (r) {
+    const n = dataParaNum(isoStr);
+    return n >= (r.deNum || dataParaNum(r.de)) && n <= (r.ateNum || dataParaNum(r.ate));
+  }
+  const [y, m, d] = isoStr.split('-');
+  return anoAtivo(y) && mesAtivo(parseInt(m, 10)) && diaAtivo(parseInt(d, 10));
+}
+// Normaliza o filtro de mês/dia para array de strings (útil para iteração)
+function mesesSelecionados() {
+  const f = STATE.filtro.mes;
+  if (f === 'all') return null; // null = todos
+  if (Array.isArray(f)) return f.length ? f.map(String) : null;
+  return [String(f)];
+}
+function diasSelecionados() {
+  const f = STATE.filtro.dia;
+  if (f === 'all') return null;
+  if (Array.isArray(f)) return f.length ? f.map(String) : null;
+  return [String(f)];
+}
+
+// Constrói label legível do período/curso atualmente filtrado (para sec1Hint, etc)
+function labelPeriodoAtual() {
+  const f = STATE.filtro;
+  // Range customizado tem prioridade
+  if (f.range) {
+    const fmt = (s) => s.split('-').reverse().join('/');
+    const partes = [`${fmt(f.range.de)} → ${fmt(f.range.ate)}`];
+    if (STATE.cursos && STATE.cursos.length) {
+      partes.push(STATE.cursos.length === 1 ? `Curso: ${STATE.cursos[0]}` : `${STATE.cursos.length} cursos`);
+    }
+    return partes.join(' · ');
+  }
+  const mSel = mesesSelecionados();
+  const dSel = diasSelecionados();
+  const partes = [];
+  if (dSel && dSel.length) {
+    if (dSel.length === 1) partes.push(`Dia ${dSel[0]}`);
+    else if (dSel.length <= 3) partes.push(`Dias ${dSel.join(', ')}`);
+    else partes.push(`${dSel.length} dias`);
+  }
+  if (mSel && mSel.length) {
+    if (mSel.length === 1) partes.push(MESES_NOMES[parseInt(mSel[0], 10) - 1]);
+    else if (mSel.length <= 4) partes.push(mSel.map(m => MESES_NOMES[parseInt(m, 10) - 1]).join(', '));
+    else partes.push(`${mSel.length} meses`);
+  }
+  if (f.ano !== 'all') partes.push(String(f.ano));
+  if (STATE.cursos && STATE.cursos.length) {
+    if (STATE.cursos.length === 1) partes.push(`Curso: ${STATE.cursos[0]}`);
+    else partes.push(`${STATE.cursos.length} cursos`);
+  }
+  return partes.length ? partes.join(' · ') : 'Período completo';
+}
 
 // Classifica o curso por palavra-chave no nome
 function getCursoTipo(curso) {
@@ -186,26 +311,173 @@ function renderTabs() {
 // ============================================================
 // FILTROS
 // ============================================================
+// Estado interno dos multi-selects (instâncias criadas em setupFiltros)
+const MS_INSTANCES = {};
+
+// Factory de Multi-Select com checkboxes (Mês, Dia, Curso).
+// config = { mount: HTMLElement, label, options: [{value, text}], placeholder, onChange(arr) }
+function createMultiSelect(config) {
+  const { mount, label, options, placeholder = 'Todos', onChange } = config;
+  mount.classList.add('ms-dropdown');
+  mount.innerHTML = `
+    <button type="button" class="ms-btn" aria-haspopup="listbox" aria-expanded="false">
+      <span class="ms-label">${escapeHtml(label)}:</span>
+      <span class="ms-value">${escapeHtml(placeholder)}</span>
+      <svg class="ms-caret" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    <div class="ms-panel" hidden>
+      <div class="ms-actions">
+        <button type="button" class="ms-action ms-all">Todos</button>
+        <button type="button" class="ms-action ms-none">Limpar</button>
+      </div>
+      <div class="ms-list" role="listbox" aria-multiselectable="true">
+        ${options.map(o => `
+          <label class="ms-item" data-value="${escapeHtml(o.value)}">
+            <input type="checkbox" value="${escapeHtml(o.value)}" />
+            <span>${escapeHtml(o.text)}</span>
+          </label>
+        `).join('')}
+      </div>
+    </div>
+  `;
+  const btn = mount.querySelector('.ms-btn');
+  const panel = mount.querySelector('.ms-panel');
+  const valueEl = mount.querySelector('.ms-value');
+  const inputs = mount.querySelectorAll('.ms-list input[type=checkbox]');
+
+  function selecionados() {
+    return Array.from(inputs).filter(i => i.checked).map(i => i.value);
+  }
+  function atualizaLabel() {
+    const sel = selecionados();
+    if (!sel.length) { valueEl.textContent = placeholder; mount.classList.remove('has-selection'); return; }
+    if (sel.length === 1) {
+      const opt = options.find(o => String(o.value) === sel[0]);
+      valueEl.textContent = opt ? opt.text : sel[0];
+    } else if (sel.length === options.length) {
+      valueEl.textContent = `Todos (${sel.length})`;
+    } else {
+      valueEl.textContent = `${sel.length} selecionados`;
+    }
+    mount.classList.add('has-selection');
+  }
+  function setValores(arr) {
+    const set = new Set((arr || []).map(String));
+    inputs.forEach(i => { i.checked = set.has(String(i.value)); });
+    atualizaLabel();
+  }
+  function abrir() { panel.hidden = false; btn.setAttribute('aria-expanded', 'true'); mount.classList.add('open'); }
+  function fechar() { panel.hidden = true; btn.setAttribute('aria-expanded', 'false'); mount.classList.remove('open'); }
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (panel.hidden) {
+      // Fecha outros painéis abertos antes
+      document.querySelectorAll('.ms-dropdown.open').forEach(d => {
+        if (d !== mount) { d.querySelector('.ms-panel').hidden = true; d.classList.remove('open'); }
+      });
+      abrir();
+    } else fechar();
+  });
+  // Clique fora fecha
+  document.addEventListener('click', (e) => {
+    if (!mount.contains(e.target)) fechar();
+  });
+  // Checkbox dispara onChange
+  inputs.forEach(i => i.addEventListener('change', () => {
+    atualizaLabel();
+    onChange(selecionados());
+  }));
+  // Botões Todos / Limpar
+  mount.querySelector('.ms-all').addEventListener('click', (e) => {
+    e.stopPropagation();
+    inputs.forEach(i => i.checked = true);
+    atualizaLabel();
+    onChange(selecionados());
+  });
+  mount.querySelector('.ms-none').addEventListener('click', (e) => {
+    e.stopPropagation();
+    inputs.forEach(i => i.checked = false);
+    atualizaLabel();
+    onChange(selecionados());
+  });
+
+  atualizaLabel();
+  return { setValores, fechar };
+}
+
 function setupFiltros() {
   const tab = STATE.data[STATE.tab];
   const anos = [...new Set(tab.mensal.map(m => m.ano))].sort();
 
+  // ============================================================
+  // Ano: select tradicional (single)
+  // ============================================================
   const selAno = document.getElementById('filtroAno');
-  const selMes = document.getElementById('filtroMes');
-  const selDia = document.getElementById('filtroDia');
-
   selAno.innerHTML = '<option value="all">Todos os anos</option>' + anos.map(a => `<option value="${a}">${a}</option>`).join('');
-  selMes.innerHTML = '<option value="all">Todos os meses</option>' + MESES_NOMES.map((n, i) => `<option value="${i+1}">${n}</option>`).join('');
-  selDia.innerHTML = '<option value="all">Todos os dias</option>' + Array.from({length: 31}, (_, i) => `<option value="${i+1}">${i+1}</option>`).join('');
-
   selAno.value = STATE.filtro.ano;
-  selMes.value = STATE.filtro.mes;
-  selDia.value = STATE.filtro.dia;
-
   selAno.onchange = () => { STATE.filtro.ano = selAno.value; clearPresets(); renderAll(); };
-  selMes.onchange = () => { STATE.filtro.mes = selMes.value; clearPresets(); renderAll(); };
-  selDia.onchange = () => { STATE.filtro.dia = selDia.value; clearPresets(); renderAll(); };
 
+  // ============================================================
+  // Mês: multi-select com checkboxes
+  // ============================================================
+  const mesOptions = MESES_NOMES.map((n, i) => ({ value: String(i+1), text: n }));
+  const mesWrap = document.getElementById('filtroMesWrap');
+  MS_INSTANCES.mes = createMultiSelect({
+    mount: mesWrap,
+    label: 'Mês',
+    options: mesOptions,
+    placeholder: 'Todos',
+    onChange: (arr) => {
+      STATE.filtro.mes = arr.length ? arr : 'all';
+      clearPresets();
+      renderAll();
+    },
+  });
+  // Inicializa a partir do STATE (caso já tenha algo)
+  MS_INSTANCES.mes.setValores(mesesSelecionados() || []);
+
+  // ============================================================
+  // Dia: multi-select com checkboxes (1-31)
+  // ============================================================
+  const diaOptions = Array.from({length: 31}, (_, i) => ({ value: String(i+1), text: String(i+1) }));
+  const diaWrap = document.getElementById('filtroDiaWrap');
+  MS_INSTANCES.dia = createMultiSelect({
+    mount: diaWrap,
+    label: 'Dia',
+    options: diaOptions,
+    placeholder: 'Todos',
+    onChange: (arr) => {
+      STATE.filtro.dia = arr.length ? arr : 'all';
+      clearPresets();
+      renderAll();
+    },
+  });
+  MS_INSTANCES.dia.setValores(diasSelecionados() || []);
+
+  // ============================================================
+  // Curso: multi-select dos cursos disponíveis
+  // ============================================================
+  const cursosDisponiveis = (STATE.data.filtros_disponiveis && STATE.data.filtros_disponiveis.cursos) || [];
+  const cursoOptions = cursosDisponiveis.map(c => ({ value: c, text: c }));
+  const cursoWrap = document.getElementById('filtroCursoWrap');
+  if (cursoWrap) {
+    MS_INSTANCES.curso = createMultiSelect({
+      mount: cursoWrap,
+      label: 'Curso',
+      options: cursoOptions,
+      placeholder: 'Todos os cursos',
+      onChange: (arr) => {
+        STATE.cursos = arr;
+        renderAll();
+      },
+    });
+    MS_INSTANCES.curso.setValores(STATE.cursos || []);
+  }
+
+  // ============================================================
+  // Presets de período
+  // ============================================================
   document.querySelectorAll('.preset').forEach(b => {
     b.onclick = () => {
       const p = b.dataset.preset;
@@ -213,23 +485,130 @@ function setupFiltros() {
       const ref = parseDataRef(STATE.data.meta.data_referencia);
       if (p === 'all') STATE.filtro = { ano:'all', mes:'all', dia:'all' };
       else if (p === 'ytd') STATE.filtro = { ano: String(ref.getFullYear()), mes:'all', dia:'all' };
-      else if (p === 'month') STATE.filtro = { ano: String(ref.getFullYear()), mes: String(ref.getMonth()+1), dia:'all' };
-      else if (p === 'today') STATE.filtro = { ano: String(ref.getFullYear()), mes: String(ref.getMonth()+1), dia: String(ref.getDate()) };
+      else if (p === 'month') STATE.filtro = { ano: String(ref.getFullYear()), mes: [String(ref.getMonth()+1)], dia:'all' };
+      else if (p === 'today') STATE.filtro = { ano: String(ref.getFullYear()), mes: [String(ref.getMonth()+1)], dia: [String(ref.getDate())] };
       selAno.value = STATE.filtro.ano;
-      selMes.value = STATE.filtro.mes;
-      selDia.value = STATE.filtro.dia;
+      MS_INSTANCES.mes && MS_INSTANCES.mes.setValores(mesesSelecionados() || []);
+      MS_INSTANCES.dia && MS_INSTANCES.dia.setValores(diasSelecionados() || []);
       renderAll();
     };
   });
 
+  // ============================================================
+  // Botão "Personalizado" — abre painel inline com 2 date pickers
+  // ============================================================
+  const btnPers = document.getElementById('btnPersonalizado');
+  const rangePanel = document.getElementById('rangePanel');
+  const rangeDe = document.getElementById('rangeDe');
+  const rangeAte = document.getElementById('rangeAte');
+  if (btnPers && rangePanel) {
+    // Pré-popula com data_referencia (último dado) e 30 dias atrás
+    const refStr = STATE.data.meta.data_referencia;
+    const ref = parseDataRef(refStr);
+    const inicio = new Date(ref); inicio.setDate(inicio.getDate() - 30);
+    const fmtIso = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if (!rangeDe.value)  rangeDe.value  = fmtIso(inicio);
+    if (!rangeAte.value) rangeAte.value = fmtIso(ref);
+
+    // Reflete range atual se já existir
+    if (STATE.filtro.range) {
+      rangeDe.value = STATE.filtro.range.de;
+      rangeAte.value = STATE.filtro.range.ate;
+      btnPers.classList.add('has-range');
+    }
+
+    // Garante estado fechado no início (defesa contra cache de CSS antigo)
+    rangePanel.hidden = true;
+    const filterBar = document.querySelector('.filter-bar');
+
+    // Abre/fecha painel e empurra filter-type pra baixo enquanto aberto
+    const abrirPanelRange = () => {
+      rangePanel.hidden = false;
+      filterBar && filterBar.classList.add('range-open');
+    };
+    const fecharPanelRange = () => {
+      rangePanel.hidden = true;
+      filterBar && filterBar.classList.remove('range-open');
+    };
+
+    btnPers.onclick = (e) => {
+      e.stopPropagation();
+      // Fecha outros painéis de multi-select antes
+      document.querySelectorAll('.ms-dropdown.open').forEach(d => {
+        d.querySelector('.ms-panel').hidden = true;
+        d.classList.remove('open');
+      });
+      if (rangePanel.hidden) abrirPanelRange();
+      else fecharPanelRange();
+    };
+    // Clique fora fecha
+    document.addEventListener('click', (e) => {
+      if (!rangePanel.hidden && !btnPers.contains(e.target) && !rangePanel.contains(e.target)) {
+        fecharPanelRange();
+      }
+    });
+    // ESC também fecha
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !rangePanel.hidden) fecharPanelRange();
+    });
+
+    // Botão Aplicar do range
+    document.getElementById('rangeApply').onclick = () => {
+      const de = rangeDe.value, ate = rangeAte.value;
+      if (!de || !ate) return;
+      if (de > ate) {
+        alert('A data inicial precisa ser anterior ou igual à data final.');
+        return;
+      }
+      // Ativa o range: zera os filtros granulares pra deixar a UI consistente
+      STATE.filtro = {
+        ano: 'all', mes: 'all', dia: 'all',
+        range: { de, ate, deNum: dataParaNum(de), ateNum: dataParaNum(ate) },
+      };
+      selAno.value = 'all';
+      MS_INSTANCES.mes && MS_INSTANCES.mes.setValores([]);
+      MS_INSTANCES.dia && MS_INSTANCES.dia.setValores([]);
+      btnPers.classList.add('has-range');
+      btnPers.textContent = `Range: ${de.split('-').reverse().join('/')} → ${ate.split('-').reverse().join('/')}`;
+      clearPresets();
+      fecharPanelRange();
+      renderAll();
+    };
+
+    // Botão Limpar do range
+    document.getElementById('rangeClear').onclick = () => {
+      STATE.filtro.range = null;
+      btnPers.classList.remove('has-range');
+      btnPers.textContent = 'Personalizado';
+      fecharPanelRange();
+      renderAll();
+    };
+  }
+
+  // ============================================================
+  // Botão Limpar Tudo
+  // ============================================================
   document.getElementById('btnClear').onclick = () => {
-    STATE.filtro = { ano:'all', mes:'all', dia:'all' };
-    selAno.value = selMes.value = selDia.value = 'all';
+    STATE.filtro = { ano:'all', mes:'all', dia:'all', range: null };
+    STATE.cursos = [];
+    selAno.value = 'all';
+    MS_INSTANCES.mes && MS_INSTANCES.mes.setValores([]);
+    MS_INSTANCES.dia && MS_INSTANCES.dia.setValores([]);
+    MS_INSTANCES.curso && MS_INSTANCES.curso.setValores([]);
+    if (btnPers) {
+      btnPers.classList.remove('has-range');
+      btnPers.textContent = 'Personalizado';
+      const fb = document.querySelector('.filter-bar');
+      if (rangePanel) rangePanel.hidden = true;
+      fb && fb.classList.remove('range-open');
+    }
     clearPresets();
     renderAll();
   };
 
+  // ============================================================
   // Filtros de TIPO de curso (MBA, Pós, Imersões)
+  // ============================================================
   document.querySelectorAll('.ft-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.tipo === STATE.tipoCurso);
     b.onclick = () => {
@@ -250,15 +629,12 @@ function calcFunilTopoFiltrado() {
   const tab = STATE.data.topo;
   const fa = tab.funil_assistencia;
   if (!fa) return null;
-  const { ano, mes } = STATE.filtro;
   // Sem filtro temporal → usa os totais agregados (mais preciso para o "geral")
-  if (ano === 'all' && mes === 'all') {
+  if (nenhumFiltroTemporal()) {
     return { ...fa.totais };
   }
-  // Filtra mensal e soma
-  let rows = fa.mensal || [];
-  if (ano !== 'all') rows = rows.filter(r => String(r.ano) === String(ano));
-  if (mes !== 'all') rows = rows.filter(r => String(r.mes) === String(mes));
+  // Filtra mensal e soma (suporta arrays em mes)
+  const rows = (fa.mensal || []).filter(r => tupleAtivo(r.ano, r.mes));
   return rows.reduce((a, r) => ({
     leads_topo:          a.leads_topo + r.leads_topo,
     mqls_topo:           a.mqls_topo + r.mqls_topo,
@@ -280,8 +656,37 @@ function calcKpisFiltrados() {
   const tab = STATE.data[STATE.tab];
   const { ano, mes, dia } = STATE.filtro;
   const tipo = STATE.tipoCurso;
+  const cursosFiltro = STATE.cursos && STATE.cursos.length;
 
   if (STATE.selecao) return calcKpisSelecao();
+
+  // ============================================================
+  // Filtro de CURSO individual (multi-select) — agrega via por_curso_mensal
+  // Vale para qualquer tipo (all/mba/pos/imersoes)
+  // ============================================================
+  if (cursosFiltro && tab.por_curso_mensal && tab.por_curso_mensal.length) {
+    const rows = tab.por_curso_mensal.filter(r =>
+      tupleAtivo(r.ano, r.mes) && cursoAtivo(r.curso) &&
+      cursoMatchTipo(r.curso, tipo)
+    );
+    const acc = rows.reduce((a, c) => ({
+      leads: a.leads + c.leads,
+      mqls:  a.mqls  + c.mqls,
+      custo: a.custo + c.custo,
+    }), { leads: 0, mqls: 0, custo: 0 });
+    // Reuniões/Ganhos/Faturamento: difícil derivar por curso individual sem nova base.
+    // Mantém null (apresenta como "—" nas KPIs)
+    const custo = acc.custo;
+    return {
+      ...acc,
+      reunioes: null, ganhos: null, faturamento: null,
+      pct_mql: acc.leads ? (acc.mqls/acc.leads*100) : 0,
+      pct_mql_reuniao: 0, pct_reuniao_ganho: 0,
+      cpl:   acc.leads ? (custo/acc.leads) : 0,
+      cpmql: acc.mqls  ? (custo/acc.mqls)  : 0,
+      cpr: 0, ticket_medio: 0, roas: 0, cac: 0,
+    };
+  }
 
   // Quando há filtro de TIPO de curso, combina:
   //   - por_curso_mensal (curso × mês)  → leads, mqls, custo
@@ -291,10 +696,10 @@ function calcKpisFiltrados() {
     // === Lead, MQL, Custo: vem do agregado por curso ===
     let leadsMqlsCusto;
     if (tab.por_curso_mensal && tab.por_curso_mensal.length) {
-      let rows = tab.por_curso_mensal;
-      if (ano !== 'all') rows = rows.filter(r => String(r.ano) === String(ano));
-      if (mes !== 'all') rows = rows.filter(r => String(r.mes) === String(mes));
-      rows = rows.filter(r => cursoMatchTipo(r.curso, tipo));
+      // Respeita ano/mes (multi) + filtro de curso individual + tipo
+      let rows = tab.por_curso_mensal
+        .filter(r => tupleAtivo(r.ano, r.mes) && cursoAtivo(r.curso))
+        .filter(r => cursoMatchTipo(r.curso, tipo));
       leadsMqlsCusto = rows.reduce((a, c) => ({
         leads: a.leads + c.leads,
         mqls:  a.mqls  + c.mqls,
@@ -302,7 +707,9 @@ function calcKpisFiltrados() {
       }), { leads: 0, mqls: 0, custo: 0 });
     } else {
       // Fallback legado: por_curso_real (sem dimensão temporal)
-      const cursos = (tab.por_curso_real || []).filter(c => cursoMatchTipo(c.curso, tipo));
+      const cursos = (tab.por_curso_real || [])
+        .filter(c => cursoMatchTipo(c.curso, tipo))
+        .filter(c => cursoAtivo(c.curso));
       leadsMqlsCusto = cursos.reduce((a, c) => ({
         leads: a.leads + c.leads,
         mqls:  a.mqls  + c.mqls,
@@ -313,9 +720,9 @@ function calcKpisFiltrados() {
     // === Reuniões, Ganhos, Faturamento: vem do agregado por tipo ===
     let financeiro = { reunioes: null, ganhos: null, faturamento: null };
     if (tab.por_tipo_mensal && tab.por_tipo_mensal.length) {
-      let rowsT = tab.por_tipo_mensal.filter(r => r.tipo === tipo);
-      if (ano !== 'all') rowsT = rowsT.filter(r => String(r.ano) === String(ano));
-      if (mes !== 'all') rowsT = rowsT.filter(r => String(r.mes) === String(mes));
+      let rowsT = tab.por_tipo_mensal
+        .filter(r => r.tipo === tipo)
+        .filter(r => tupleAtivo(r.ano, r.mes));
       financeiro = rowsT.reduce((a, c) => ({
         reunioes:    a.reunioes    + c.reunioes,
         ganhos:      a.ganhos      + c.ganhos,
@@ -339,13 +746,19 @@ function calcKpisFiltrados() {
     };
   }
 
-  // Dia específico → série diária + regra de 3 para reuniões (não existem na diária)
-  if (dia !== 'all' && mes !== 'all' && ano !== 'all') {
-    const target = `${ano}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+  // Dia específico (SINGLE) → série diária + regra de 3 para reuniões
+  // Só usa o caminho rápido quando ano/mes/dia são todos valores únicos (não-array)
+  const diasSel = diasSelecionados();
+  const mesesSel = mesesSelecionados();
+  const isSingleDay = ano !== 'all' && mesesSel && mesesSel.length === 1
+                   && diasSel && diasSel.length === 1;
+  if (isSingleDay) {
+    const mesUnico = mesesSel[0], diaUnico = diasSel[0];
+    const target = `${ano}-${String(mesUnico).padStart(2,'0')}-${String(diaUnico).padStart(2,'0')}`;
     const row = (tab.diario || []).find(d => d.data === target);
     if (!row) return baseKpisZero();
     // Estimativa proporcional de Reuniões Qualificadas para o dia (regra de 3 sobre o mês)
-    const anoN = parseInt(ano, 10), mesN = parseInt(mes, 10);
+    const anoN = parseInt(ano, 10), mesN = parseInt(mesUnico, 10);
     const mesInt = (tab.mensal || []).find(x => x.ano === anoN && x.mes === mesN);
     const diasNoMes = new Date(anoN, mesN, 0).getDate();
     const reunioesEst = mesInt && diasNoMes ? Math.round((mesInt.reunioes_qualificadas || 0) / diasNoMes) : 0;
@@ -365,10 +778,32 @@ function calcKpisFiltrados() {
     };
   }
 
-  // Agrega meses respeitando filtros Ano/Mês
-  let meses = tab.mensal;
-  if (ano !== 'all') meses = meses.filter(m => String(m.ano) === String(ano));
-  if (mes !== 'all') meses = meses.filter(m => String(m.mes) === String(mes));
+  // Agrega meses respeitando filtros Ano/Mês (mes pode ser array)
+  let meses = (tab.mensal || []).filter(m => tupleAtivo(m.ano, m.mes));
+  // Se houver dias selecionados (multi) OU range customizado, agrega via diário
+  if ((diasSel && diasSel.length) || STATE.filtro.range) {
+    const dias = (tab.diario || []).filter(d => {
+      if (STATE.filtro.range) return dataIsoAtiva(d.data);
+      const [yy, mm, dd] = d.data.split('-');
+      return anoAtivo(yy) && mesAtivo(parseInt(mm, 10)) && diasSel.includes(String(parseInt(dd, 10)));
+    });
+    const acc = dias.reduce((a, d) => ({
+      leads: a.leads + (d.leads||0), mqls: a.mqls + (d.mqls||0),
+      custo: a.custo + (d.custo||0), ganhos: a.ganhos + (d.ganhos||0),
+      faturamento: a.faturamento + (d.faturamento||0),
+      reunioes: a.reunioes + 0, // diário não tem reuniões — estimativa não é confiável p/ multi-dia
+    }), { leads:0, mqls:0, custo:0, ganhos:0, faturamento:0, reunioes:0 });
+    return {
+      ...acc,
+      pct_mql: acc.leads ? (acc.mqls/acc.leads*100) : 0,
+      pct_mql_reuniao: 0, pct_reuniao_ganho: 0,
+      cpl: acc.leads ? (acc.custo/acc.leads) : 0,
+      cpmql: acc.mqls ? (acc.custo/acc.mqls) : 0,
+      cpr: 0, ticket_medio: acc.ganhos ? (acc.faturamento/acc.ganhos) : 0,
+      roas: acc.custo ? (acc.faturamento/acc.custo) : 0,
+      cac: acc.ganhos ? (acc.custo/acc.ganhos) : 0,
+    };
+  }
   const acc = meses.reduce((a, m) => ({
     leads: a.leads + m.leads, mqls: a.mqls + m.mqls,
     custo: a.custo + m.custo, ganhos: a.ganhos + m.ganhos,
@@ -511,10 +946,19 @@ function calcKpisPeriodo({ ano, mes, diaInicio = null, diaFim = null }) {
 function calcKpisMesAnterior() {
   if (STATE.selecao) return null;
   if (STATE.tipoCurso !== 'all') return null;
+  if (STATE.cursos && STATE.cursos.length) return null; // filtro de curso → desabilita MoM
+  if (STATE.filtro.range) return null;                  // range customizado → desabilita MoM
 
-  const { ano, mes, dia } = STATE.filtro;
-  // MoM exige mês específico (ano OU mês "all" não dá pra calcular)
-  if (ano === 'all' || mes === 'all') return null;
+  const { ano } = STATE.filtro;
+  const mesesSel = mesesSelecionados();
+  const diasSel = diasSelecionados();
+  // MoM exige UM mês e UM ano específicos
+  if (ano === 'all') return null;
+  if (!mesesSel || mesesSel.length !== 1) return null;
+  // Se há dias, exige um único dia (para "mesmo dia do mês anterior")
+  if (diasSel && diasSel.length > 1) return null;
+  const mes = mesesSel[0];
+  const dia = (diasSel && diasSel.length === 1) ? diasSel[0] : 'all';
 
   // Mês anterior
   let anoAnt = parseInt(ano, 10);
@@ -543,8 +987,16 @@ function calcKpisMesAnterior() {
 
 function momLabel() {
   if (STATE.selecao || STATE.tipoCurso !== 'all') return null;
-  const { ano, mes, dia } = STATE.filtro;
-  if (ano === 'all' || mes === 'all') return null;
+  if (STATE.cursos && STATE.cursos.length) return null;
+  if (STATE.filtro.range) return null;
+  const { ano } = STATE.filtro;
+  const mesesSel = mesesSelecionados();
+  const diasSel = diasSelecionados();
+  if (ano === 'all') return null;
+  if (!mesesSel || mesesSel.length !== 1) return null;
+  if (diasSel && diasSel.length > 1) return null;
+  const mes = mesesSel[0];
+  const dia = (diasSel && diasSel.length === 1) ? diasSel[0] : 'all';
   if (dia !== 'all') return 'MoM';
   const dataRef = parseDataRef(STATE.data.meta.data_referencia);
   const mesEmCurso = parseInt(ano, 10) === dataRef.getFullYear()
@@ -556,10 +1008,18 @@ function momLabel() {
 function calcKpisAnoAnterior() {
   if (STATE.selecao) return null;
   if (STATE.tipoCurso !== 'all') return null;
+  if (STATE.cursos && STATE.cursos.length) return null;
+  if (STATE.filtro.range) return null;
 
-  const { ano, mes, dia } = STATE.filtro;
-  // YoY exige ano específico
+  const { ano } = STATE.filtro;
+  const mesesSel = mesesSelecionados();
+  const diasSel = diasSelecionados();
+  // YoY exige ano específico, e quando há mês/dia exige valor único
   if (ano === 'all') return null;
+  if (mesesSel && mesesSel.length > 1) return null;
+  if (diasSel && diasSel.length > 1) return null;
+  const mes = mesesSel ? mesesSel[0] : 'all';
+  const dia = diasSel ? diasSel[0] : 'all';
 
   const anoAnt = parseInt(ano, 10) - 1;
   const tab = STATE.data[STATE.tab];
@@ -612,8 +1072,16 @@ function calcKpisAnoAnterior() {
 
 function yoyLabel() {
   if (STATE.selecao || STATE.tipoCurso !== 'all') return null;
-  const { ano, mes, dia } = STATE.filtro;
+  if (STATE.cursos && STATE.cursos.length) return null;
+  if (STATE.filtro.range) return null;
+  const { ano } = STATE.filtro;
+  const mesesSel = mesesSelecionados();
+  const diasSel = diasSelecionados();
   if (ano === 'all') return null;
+  if (mesesSel && mesesSel.length > 1) return 'YoY';
+  if (diasSel && diasSel.length > 1) return 'YoY';
+  const mes = mesesSel ? mesesSel[0] : 'all';
+  const dia = diasSel ? diasSel[0] : 'all';
   if (dia !== 'all' || mes === 'all') return 'YoY';
   const dataRef = parseDataRef(STATE.data.meta.data_referencia);
   const mesEmCurso = parseInt(ano, 10) === dataRef.getFullYear()
@@ -765,8 +1233,8 @@ function calcKpisSelecao() {
     };
   }
   if (sel.tipo === 'curso') {
-    const tab = STATE.data[STATE.tab];
-    const reg = (tab.por_curso_real || []).find(c => c.curso === sel.valor);
+    // Usa por_curso_real_filtrado para respeitar filtro temporal quando ativo
+    const reg = getPorCursoRealFiltrado().find(c => c.curso === sel.valor);
     if (!reg) return baseKpisZero();
     return {
       leads: reg.leads, mqls: reg.mqls, custo: reg.custo,
@@ -811,10 +1279,7 @@ function renderKPIs() {
 
   // Atualiza títulos
   document.getElementById('sec1Title').textContent = isFundo ? 'Indicadores · Fundo' : 'Indicadores · Topo';
-  const periodo = STATE.filtro.ano === 'all' && STATE.filtro.mes === 'all'
-    ? 'Período completo'
-    : `${STATE.filtro.dia !== 'all' ? STATE.filtro.dia + '/' : ''}${STATE.filtro.mes !== 'all' ? MESES_NOMES[STATE.filtro.mes-1] + ' · ' : ''}${STATE.filtro.ano !== 'all' ? STATE.filtro.ano : ''}`;
-  document.getElementById('sec1Hint').textContent = sel ? `Seleção: ${sel.valor}` : periodo;
+  document.getElementById('sec1Hint').textContent = sel ? `Seleção: ${sel.valor}` : labelPeriodoAtual();
 
   const kAA  = calcKpisMesAnterior();     // MoM
   const kAAY = calcKpisAnoAnterior();     // YoY
@@ -839,9 +1304,13 @@ function renderKPIs() {
   const subMatric      = isFundo ? 'vendas fechadas' : 'leads que passaram pelo Topo';
   const subReu         = isFundo ? 'Atividade tipo Reunião + Quali. OK' : 'reuniões com assistência do Topo';
 
-  // Reuniões e CPR são estimados via regra de 3 quando filtro de dia específico está ativo
+  // Reuniões e CPR são estimados via regra de 3 quando filtro de dia ÚNICO + mês ÚNICO + ano único está ativo
   // (série diária não traz reuniões, então usamos proporção mensal).
-  const isEstimado = STATE.filtro.dia !== 'all' && STATE.filtro.mes !== 'all' && STATE.filtro.ano !== 'all';
+  const _msSel = mesesSelecionados();
+  const _dsSel = diasSelecionados();
+  const isEstimado = STATE.filtro.ano !== 'all'
+                  && _msSel && _msSel.length === 1
+                  && _dsSel && _dsSel.length === 1;
   const estTag = isEstimado ? '<span class="kpi-tag est">≈ estimado</span>' : '';
 
   // 4 cards HERO (2x2): Leads · MQLs / Reuniões · Matrículas
@@ -1177,7 +1646,7 @@ function renderSerieTemporal() {
   // específico de MÊS (mostraria 1 barra só) mas respeita o filtro de ANO.
   // Se ano específico: mostra esse ano inteiro. Se ano=all: últimos 12 meses.
   if (STATE.filtro.ano !== 'all') {
-    meses = meses.filter(m => String(m.ano) === String(STATE.filtro.ano));
+    meses = meses.filter(m => anoAtivo(m.ano));
   } else {
     meses = meses.slice(-12);                      // últimos 12 meses como janela móvel
   }
@@ -1260,7 +1729,7 @@ function renderFontes() {
     document.getElementById('chartFontesTitle').textContent = 'Fontes desta campanha';
   } else if (STATE.selecao && STATE.selecao.tipo === 'curso') {
     const acc = {};
-    (tab.todas_campanhas || []).filter(c => (c.cursos || []).includes(STATE.selecao.valor)).forEach(c => {
+    getTodasCampanhasFiltradas().filter(c => (c.cursos || []).includes(STATE.selecao.valor)).forEach(c => {
       (c.fontes || []).forEach(f => {
         if (!acc[f.fonte]) acc[f.fonte] = { label: f.fonte, leads: 0, mqls: 0 };
         acc[f.fonte].leads += f.leads;
@@ -1272,7 +1741,7 @@ function renderFontes() {
   } else if (STATE.tipoCurso !== 'all') {
     // Filtro de tipo ativo — agrega fontes apenas das campanhas que tem cursos do tipo
     const acc = {};
-    (tab.todas_campanhas || []).filter(c => (c.cursos || []).some(cu => cursoMatchTipo(cu, STATE.tipoCurso))).forEach(c => {
+    getTodasCampanhasFiltradas().filter(c => (c.cursos || []).some(cu => cursoMatchTipo(cu, STATE.tipoCurso))).forEach(c => {
       (c.fontes || []).forEach(f => {
         if (!acc[f.fonte]) acc[f.fonte] = { label: f.fonte, leads: 0, mqls: 0 };
         acc[f.fonte].leads += f.leads;
@@ -1343,22 +1812,208 @@ function renderFontes() {
 }
 
 // ============================================================
+// HELPERS DE AGREGAÇÃO FILTRADA
+// ============================================================
+// Permitem que a Galeria de Criativos (e tudo que lê todas_campanhas/por_curso_real)
+// respeite o filtro de Ano/Mês. Sem isso, a Galeria mostrava o agregado GLOBAL
+// (todo o histórico) independente do filtro selecionado.
+// ============================================================
+
+// Retorna true se NÃO há filtro temporal ativo (caminho rápido)
+// Agora delega para `nenhumFiltroTemporal()` (suporta arrays de mes/dia)
+function semFiltroTemporal() {
+  return nenhumFiltroTemporal() && (!STATE.cursos || STATE.cursos.length === 0);
+}
+
+// Filtra meses da árvore (formato pipeline: [{ano, mes, ...}]) pelo STATE.filtro
+function filtrarMesesPorState(meses) {
+  return meses.filter(m => tupleAtivo(m.ano, m.mes));
+}
+
+// ------------------------------------------------------------
+// Reagrega `campanhas_arvore_mensal` somando os meses do filtro.
+// Devolve a MESMA estrutura de `todas_campanhas`:
+//   [{campanha, leads, mqls, pct_mql, custo, cursos, fontes:[
+//      {fonte, leads, mqls, pct_mql, custo, criativos:[
+//        {criativo, leads, mqls, pct_mql, custo}
+//      ]}
+//   ]}]
+// ------------------------------------------------------------
+function getTodasCampanhasFiltradas() {
+  const tab = STATE.data[STATE.tab];
+
+  // Sem filtro temporal NEM filtro de curso → usa agregado global pré-calculado (rápido)
+  if (semFiltroTemporal()) return tab.todas_campanhas || [];
+
+  const arvore = tab.campanhas_arvore_mensal || [];
+  if (!arvore.length) {
+    // Fallback: pipeline antigo sem a árvore mensal → retorna global filtrando só por curso
+    let base = tab.todas_campanhas || [];
+    if (STATE.cursos && STATE.cursos.length) {
+      base = base.filter(c => (c.cursos || []).some(cu => STATE.cursos.includes(cu)));
+    }
+    return base;
+  }
+
+  const mesesFiltrados = filtrarMesesPorState(arvore);
+  if (!mesesFiltrados.length) return [];
+
+  // Filtro de curso aplica sobre a lista de cursos da campanha
+  const passaCurso = (c) => {
+    if (!STATE.cursos || STATE.cursos.length === 0) return true;
+    return (c.cursos || []).some(cu => STATE.cursos.includes(cu));
+  };
+
+  // Acumuladores
+  const accCamp = new Map(); // campanha -> {leads, mqls, custo, cursosSet, fontesMap}
+  // fontesMap: fonte -> {leads, mqls, custo, criativosMap}
+  // criativosMap: criativo -> {leads, mqls}
+
+  for (const mObj of mesesFiltrados) {
+    for (const c of (mObj.campanhas || [])) {
+      if (!passaCurso(c)) continue; // respeita filtro de curso
+      let A = accCamp.get(c.campanha);
+      if (!A) {
+        A = { leads: 0, mqls: 0, custo: 0, cursosSet: new Set(), fontesMap: new Map() };
+        accCamp.set(c.campanha, A);
+      }
+      A.leads += c.leads || 0;
+      A.mqls  += c.mqls  || 0;
+      A.custo += c.custo || 0;
+      (c.cursos || []).forEach(cu => A.cursosSet.add(cu));
+
+      for (const f of (c.fontes || [])) {
+        let F = A.fontesMap.get(f.fonte);
+        if (!F) {
+          F = { leads: 0, mqls: 0, custo: 0, criativosMap: new Map() };
+          A.fontesMap.set(f.fonte, F);
+        }
+        F.leads += f.leads || 0;
+        F.mqls  += f.mqls  || 0;
+        F.custo += f.custo || 0;
+
+        for (const cr of (f.criativos || [])) {
+          let CR = F.criativosMap.get(cr.criativo);
+          if (!CR) {
+            CR = { leads: 0, mqls: 0 };
+            F.criativosMap.set(cr.criativo, CR);
+          }
+          CR.leads += cr.leads || 0;
+          CR.mqls  += cr.mqls  || 0;
+        }
+      }
+    }
+  }
+
+  // Serializa de volta pro mesmo formato de todas_campanhas
+  const out = [];
+  for (const [campNome, A] of accCamp) {
+    const fontes = [];
+    for (const [fNome, F] of A.fontesMap) {
+      const criativos = [];
+      for (const [crNome, CR] of F.criativosMap) {
+        criativos.push({
+          criativo: crNome,
+          leads: CR.leads,
+          mqls:  CR.mqls,
+          pct_mql: CR.leads ? Number(((CR.mqls / CR.leads) * 100).toFixed(1)) : 0,
+          custo: 0,
+        });
+      }
+      criativos.sort((a, b) => b.pct_mql - a.pct_mql);
+      fontes.push({
+        fonte: fNome,
+        leads: F.leads,
+        mqls:  F.mqls,
+        pct_mql: F.leads ? Number(((F.mqls / F.leads) * 100).toFixed(1)) : 0,
+        custo: Number(F.custo.toFixed(2)),
+        criativos,
+      });
+    }
+    fontes.sort((a, b) => b.leads - a.leads);
+
+    out.push({
+      campanha: campNome,
+      leads: A.leads,
+      mqls:  A.mqls,
+      pct_mql: A.leads ? Number(((A.mqls / A.leads) * 100).toFixed(1)) : 0,
+      custo: Number(A.custo.toFixed(2)),
+      cursos: Array.from(A.cursosSet),
+      fontes,
+    });
+  }
+  out.sort((a, b) => b.leads - a.leads);
+  return out;
+}
+
+// ------------------------------------------------------------
+// Reagrega `por_curso_mensal` (flat) somando meses do filtro.
+// Devolve mesmo formato de `por_curso_real`:
+//   [{curso, leads, mqls, pct_mql, custo, cpl, cpmql}]
+// ------------------------------------------------------------
+function getPorCursoRealFiltrado() {
+  const tab = STATE.data[STATE.tab];
+
+  if (semFiltroTemporal()) {
+    let base = tab.por_curso_real || [];
+    if (STATE.cursos && STATE.cursos.length) base = base.filter(r => STATE.cursos.includes(r.curso));
+    return base;
+  }
+
+  const mensal = tab.por_curso_mensal || [];
+  if (!mensal.length) {
+    let base = tab.por_curso_real || [];
+    if (STATE.cursos && STATE.cursos.length) base = base.filter(r => STATE.cursos.includes(r.curso));
+    return base; // fallback
+  }
+
+  const linhas = mensal.filter(r =>
+    tupleAtivo(r.ano, r.mes) && cursoAtivo(r.curso)
+  );
+
+  const acc = new Map();
+  for (const r of linhas) {
+    let A = acc.get(r.curso);
+    if (!A) {
+      A = { curso: r.curso, leads: 0, mqls: 0, custo: 0 };
+      acc.set(r.curso, A);
+    }
+    A.leads += r.leads || 0;
+    A.mqls  += r.mqls  || 0;
+    A.custo += r.custo || 0;
+  }
+
+  const out = [];
+  for (const A of acc.values()) {
+    const pct = A.leads ? Number(((A.mqls / A.leads) * 100).toFixed(1)) : 0;
+    out.push({
+      curso: A.curso,
+      leads: A.leads,
+      mqls:  A.mqls,
+      pct_mql: pct,
+      custo: Number(A.custo.toFixed(2)),
+      cpl:   A.leads ? Number((A.custo / A.leads).toFixed(2)) : 0,
+      cpmql: A.mqls  ? Number((A.custo / A.mqls).toFixed(2))  : 0,
+    });
+  }
+  out.sort((a, b) => b.leads - a.leads);
+  return out;
+}
+
+// ============================================================
 // RANKING
 // ============================================================
 // Calcula Top 5 / Bottom 5 dinamicamente respeitando filtro de data
 function calcRankingFiltrado() {
   const tab = STATE.data[STATE.tab];
-  const { ano, mes, dia } = STATE.filtro;
 
-  // Sem filtro temporal → ranking pré-calculado do JSON
-  if (ano === 'all' && mes === 'all' && dia === 'all') {
+  // Sem filtro temporal e sem curso → ranking pré-calculado do JSON
+  if (semFiltroTemporal()) {
     return tab.ranking_criativos;
   }
 
   // Filtra campanhas_mensal pelos meses no recorte
-  let meses = tab.campanhas_mensal || [];
-  if (ano !== 'all') meses = meses.filter(m => String(m.ano) === String(ano));
-  if (mes !== 'all') meses = meses.filter(m => String(m.mes) === String(mes));
+  const meses = (tab.campanhas_mensal || []).filter(m => tupleAtivo(m.ano, m.mes));
   if (!meses.length) return { top5: [], bottom5: [], total_campanhas_avaliadas: 0 };
 
   // Agrega campanhas
@@ -1384,8 +2039,9 @@ function calcRankingFiltrado() {
     camps = camps.filter(c => c.leads >= MIN_LEADS && c.custo >= 1);
   }
 
-  // Anexa fontes/criativos da Galeria (sem filtro temporal — limitação aceita)
-  const todas = tab.todas_campanhas || [];
+  // Anexa fontes/criativos da Galeria — AGORA respeitando o filtro temporal
+  // (usa campanhas_arvore_mensal via getTodasCampanhasFiltradas)
+  const todas = getTodasCampanhasFiltradas();
   const enrich = (c) => {
     const full = todas.find(x => x.campanha === c.campanha);
     return { ...c, fontes: full ? full.fontes : [] };
@@ -1524,7 +2180,7 @@ function renderRanking() {
   });
 }
 
-function findCampanhaCompleta(c) { return (STATE.data[STATE.tab].todas_campanhas || []).find(x => x.campanha === c); }
+function findCampanhaCompleta(c) { return getTodasCampanhasFiltradas().find(x => x.campanha === c); }
 function findCriativo(camp, cr) {
   const c = findCampanhaCompleta(camp); if (!c) return null;
   for (const f of c.fontes) {
@@ -1543,7 +2199,8 @@ const TABLE_STATE = {
 
 function renderTabelaHierarquica() {
   const tab = STATE.data[STATE.tab];
-  let cursosBase = (tab.por_curso_real || []).slice().sort((a, b) => b.leads - a.leads);
+  // Cursos filtrados pelo período (era tab.por_curso_real - global)
+  let cursosBase = getPorCursoRealFiltrado().slice().sort((a, b) => b.leads - a.leads);
   // Filtro por tipo de curso
   if (STATE.tipoCurso !== 'all') {
     cursosBase = cursosBase.filter(c => cursoMatchTipo(c.curso, STATE.tipoCurso));
@@ -1716,14 +2373,14 @@ function renderTabelaHierarquica() {
 }
 
 function campanhasDoCurso(cursoNome) {
-  return (STATE.data[STATE.tab].todas_campanhas || [])
+  return getTodasCampanhasFiltradas()
     .filter(c => (c.cursos || []).includes(cursoNome))
     .sort((a, b) => b.leads - a.leads);
 }
 
 function renderTabelaCampanhas() {
   const tab = STATE.data[STATE.tab];
-  let camps = [...(tab.todas_campanhas || [])];
+  let camps = [...getTodasCampanhasFiltradas()];
   const q = normalize(STATE.busca.tabela);
 
   if (q) {
@@ -1793,8 +2450,10 @@ function renderTabelaCampanhas() {
 
   tbody.innerHTML = html || '<tr><td colspan="7"><div class="empty">Sem resultados.</div></td></tr>';
 
+  // Total considera o universo filtrado (ou o global se não há filtro)
+  const totalCamps = getTodasCampanhasFiltradas().length;
   document.getElementById('tabelaFooter').textContent =
-    `${camps.length} de ${(tab.todas_campanhas || []).length} campanhas${q ? ` · busca: "${STATE.busca.tabela}"` : ''}`;
+    `${camps.length} de ${totalCamps} campanhas${q ? ` · busca: "${STATE.busca.tabela}"` : ''}`;
 
   tbody.querySelectorAll('.camp-row').forEach(row => {
     const camp = row.dataset.campanha;
@@ -1888,9 +2547,10 @@ function setupExport() {
       const kpisData = [
         ['Métrica', 'Valor'],
         ['Tab', tabName],
-        ['Filtro Ano', STATE.filtro.ano],
-        ['Filtro Mês', STATE.filtro.mes],
-        ['Filtro Dia', STATE.filtro.dia],
+        ['Filtro Ano', String(STATE.filtro.ano)],
+        ['Filtro Mês', Array.isArray(STATE.filtro.mes) ? STATE.filtro.mes.join(',') : String(STATE.filtro.mes)],
+        ['Filtro Dia', Array.isArray(STATE.filtro.dia) ? STATE.filtro.dia.join(',') : String(STATE.filtro.dia)],
+        ['Filtro Cursos', (STATE.cursos || []).join(' | ') || 'todos'],
         ['Seleção (cross-filter)', STATE.selecao ? `${STATE.selecao.tipo}: ${STATE.selecao.valor}` : '—'],
         ['Leads', k.leads],
         ['MQLs', k.mqls],
@@ -1967,8 +2627,8 @@ function renderEmptyStateBanner() {
   const id = 'emptyStateBanner';
   let banner = document.getElementById(id);
   const k = calcKpisFiltrados();
-  const hasFiltro = STATE.filtro.ano !== 'all' || STATE.filtro.mes !== 'all'
-                 || STATE.filtro.dia !== 'all' || STATE.tipoCurso !== 'all';
+  const hasFiltro = !nenhumFiltroTemporal() || STATE.tipoCurso !== 'all'
+                 || (STATE.cursos && STATE.cursos.length > 0);
   const zerado = (!k.leads && !k.mqls && !k.custo);
 
   let mensagem = null;
@@ -2007,34 +2667,18 @@ function renderCanaisPagos() {
   }
 
   const tab = STATE.data[STATE.tab];
-  const { ano, mes } = STATE.filtro;
 
-  // Decide se usa dados filtrados (mensal) ou globais
+  // Decide se usa dados filtrados (mensal) ou globais (sempre filtra via helpers)
   let porFonteAgregado = [];
-  if (ano !== 'all' || mes !== 'all') {
-    // Filtra por_fonte_mensal e agrega
-    let meses = tab.por_fonte_mensal || [];
-    if (ano !== 'all') meses = meses.filter(m => String(m.ano) === String(ano));
-    if (mes !== 'all') meses = meses.filter(m => String(m.mes) === String(mes));
-    const acc = {};
-    meses.forEach(m => (m.fontes || []).forEach(f => {
-      if (!acc[f.fonte]) acc[f.fonte] = { label: f.fonte, leads: 0, mqls: 0, custo: 0 };
-      acc[f.fonte].leads += f.leads;
-      acc[f.fonte].mqls  += f.mqls;
-      acc[f.fonte].custo += f.custo;
-    }));
-    porFonteAgregado = Object.values(acc);
-  } else {
-    // Sem filtro temporal → soma os totais de por_fonte_mensal pra ter consistência
-    const acc = {};
-    (tab.por_fonte_mensal || []).forEach(m => (m.fontes || []).forEach(f => {
-      if (!acc[f.fonte]) acc[f.fonte] = { label: f.fonte, leads: 0, mqls: 0, custo: 0 };
-      acc[f.fonte].leads += f.leads;
-      acc[f.fonte].mqls  += f.mqls;
-      acc[f.fonte].custo += f.custo;
-    }));
-    porFonteAgregado = Object.values(acc);
-  }
+  const meses = (tab.por_fonte_mensal || []).filter(m => tupleAtivo(m.ano, m.mes));
+  const acc = {};
+  meses.forEach(m => (m.fontes || []).forEach(f => {
+    if (!acc[f.fonte]) acc[f.fonte] = { label: f.fonte, leads: 0, mqls: 0, custo: 0 };
+    acc[f.fonte].leads += f.leads;
+    acc[f.fonte].mqls  += f.mqls;
+    acc[f.fonte].custo += f.custo;
+  }));
+  porFonteAgregado = Object.values(acc);
 
   const findFonte = (key) => porFonteAgregado.find(p => p.label.toLowerCase().includes(key));
 
@@ -2162,12 +2806,10 @@ function renderCanalDrawer() {
   document.getElementById('cdNome').textContent = CANAL_NOMES_MAP[canalKey] || canalKey;
 
   const tab = STATE.data[STATE.tab];
-  const { ano, mes } = STATE.filtro;
 
   // Coleta campanhas do canal RESPEITANDO filtro de data via campanhas_por_fonte_mensal
-  let meses = tab.campanhas_por_fonte_mensal || [];
-  if (ano !== 'all') meses = meses.filter(m => String(m.ano) === String(ano));
-  if (mes !== 'all') meses = meses.filter(m => String(m.mes) === String(mes));
+  const meses = (tab.campanhas_por_fonte_mensal || [])
+    .filter(m => tupleAtivo(m.ano, m.mes));
 
   // Agrega por nome de campanha
   const acc = {};
@@ -2234,10 +2876,7 @@ function renderCanalDrawer() {
   }
 
   // Texto do filtro ativo
-  let filtroTxt = 'período completo';
-  if (ano !== 'all' && mes !== 'all')        filtroTxt = `${MESES_NOMES[parseInt(mes,10)-1]}/${ano}`;
-  else if (ano !== 'all')                    filtroTxt = `${ano}`;
-  else if (mes !== 'all')                    filtroTxt = `${MESES_NOMES[parseInt(mes,10)-1]} (todos anos)`;
+  const filtroTxt = labelPeriodoAtual().toLowerCase();
   document.getElementById('cdFoot').textContent =
     `${filtradas.length} campanha(s) · ${filtroTxt} · ordem: investimento ↓`;
 }

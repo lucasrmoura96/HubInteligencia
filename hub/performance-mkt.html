@@ -77,13 +77,30 @@
     <div class="filter-bar">
       <span class="fb-label">Período</span>
       <select id="filtroAno" aria-label="Ano"></select>
-      <select id="filtroMes" aria-label="Mês"></select>
-      <select id="filtroDia" aria-label="Dia"></select>
+      <div id="filtroMesWrap" class="ms-dropdown" data-msfor="mes"></div>
+      <div id="filtroDiaWrap" class="ms-dropdown" data-msfor="dia"></div>
 
       <button class="preset" data-preset="all">Tudo</button>
       <button class="preset" data-preset="ytd">YTD</button>
       <button class="preset" data-preset="month">Mês atual</button>
       <button class="preset" data-preset="today">Hoje</button>
+
+      <!-- Range customizado: botão abre painel inline com 2 date pickers -->
+      <div class="range-wrap" id="rangeWrap">
+        <button class="preset preset-range" id="btnPersonalizado" type="button">Personalizado</button>
+        <div class="range-panel" id="rangePanel" hidden>
+          <label class="range-field">
+            <span>De</span>
+            <input type="date" id="rangeDe" />
+          </label>
+          <label class="range-field">
+            <span>Até</span>
+            <input type="date" id="rangeAte" />
+          </label>
+          <button class="range-apply" id="rangeApply" type="button">Aplicar</button>
+          <button class="range-clear" id="rangeClear" type="button">Limpar</button>
+        </div>
+      </div>
 
       <button class="btn-clear" id="btnClear" aria-label="Limpar filtros">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -91,7 +108,7 @@
       </button>
     </div>
 
-    <!-- Filtro Tipo de Curso -->
+    <!-- Filtro Tipo de Curso + Curso individual -->
     <div class="filter-type">
       <span class="ft-label">Tipo</span>
       <div class="ft-buttons">
@@ -100,6 +117,8 @@
         <button class="ft-btn" data-tipo="pos">Pós</button>
         <button class="ft-btn" data-tipo="imersoes">Imersões</button>
       </div>
+      <span class="ft-label" style="margin-left: 16px;">Curso</span>
+      <div id="filtroCursoWrap" class="ms-dropdown ms-wide" data-msfor="curso"></div>
     </div>
 
     <!-- Cross-filter ativo -->

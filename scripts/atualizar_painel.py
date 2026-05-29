@@ -1476,6 +1476,138 @@ def campanhas_por_fonte_mensal(rd: pd.DataFrame, inv: pd.DataFrame, grupo: str) 
     return out
 
 
+def campanhas_arvore_mensal(rd: pd.DataFrame, inv: pd.DataFrame, grupo: str) -> list:
+    """Por mês: árvore COMPLETA Campanha → Fonte → Criativo com leads/MQLs/custo.
+
+    Permite ao JS reconstruir a Galeria de Criativos respeitando o filtro de data.
+    Antes desta função, fontes/criativos só existiam em `todas_campanhas` (global),
+    e a Galeria mostrava o agregado de TODO o histórico independente do filtro.
+
+    Estrutura:
+        [
+          {ano, mes, periodo: "YYYY-MM", campanhas: [
+            {campanha, leads, mqls, pct_mql, custo, cursos, fontes: [
+              {fonte, leads, mqls, pct_mql, custo, criativos: [
+                {criativo, leads, mqls, pct_mql, custo}
+              ]}
+            ]}
+          ]}
+        ]
+    """
+    rd_g = rd[rd["Grupo"] == grupo].copy()
+    inv_g = inv[inv["Grupo"] == grupo].copy()
+
+    rd_g["campanha_chave"] = rd_g["utm_campaign"].fillna("").str.strip()
+    rd_g.loc[rd_g["campanha_chave"] == "", "campanha_chave"] = rd_g["Identificador"].fillna("Não identificado")
+    rd_g["AnoMes"] = rd_g["Data da Conversão"].dt.to_period("M").astype(str)
+
+    inv_g["camp_norm"] = inv_g["Campanha"].fillna("").str.strip()
+    inv_g["AnoMes"] = inv_g["Data"].dt.to_period("M").astype(str)
+
+    meses = sorted(set(rd_g["AnoMes"].dropna()))
+    out = []
+    for m in meses:
+        try:
+            ano, mes = m.split("-")
+            ano, mes = int(ano), int(mes)
+        except Exception:
+            continue
+        rd_m = rd_g[rd_g["AnoMes"] == m]
+        inv_m = inv_g[inv_g["AnoMes"] == m]
+
+        # Custos do mês (campanha e campanha×fonte) com fallback normalizado
+        custo_camp = inv_m.groupby("camp_norm")["Custo"].sum().to_dict()
+        custo_camp_fonte = inv_m.groupby(["camp_norm", "Fonte_norm"])["Custo"].sum().to_dict()
+
+        def busca_custo_camp(c):
+            if not c:
+                return 0.0
+            if c in custo_camp:
+                return float(custo_camp[c])
+            c_norm = re.sub(r"[\s_]+", "", c.lower())
+            for k, v in custo_camp.items():
+                if re.sub(r"[\s_]+", "", k.lower()) == c_norm:
+                    return float(v)
+            return 0.0
+
+        def busca_custo_camp_fonte(c, f):
+            if (c, f) in custo_camp_fonte:
+                return float(custo_camp_fonte[(c, f)])
+            c_norm = re.sub(r"[\s_]+", "", c.lower())
+            for (k_c, k_f), v in custo_camp_fonte.items():
+                if k_f == f and re.sub(r"[\s_]+", "", k_c.lower()) == c_norm:
+                    return float(v)
+            return 0.0
+
+        # Agrega campanhas do mês
+        agg_camp = rd_m.groupby("campanha_chave").agg(
+            leads=("Index", "count"),
+            mqls=("Class", lambda x: (x == "MQL").sum()),
+        ).reset_index()
+
+        campanhas = []
+        for _, r in agg_camp.iterrows():
+            campanha = r["campanha_chave"]
+            sub = rd_m[rd_m["campanha_chave"] == campanha]
+            leads_c = int(r["leads"])
+            mqls_c = int(r["mqls"])
+            custo_c = busca_custo_camp(campanha)
+
+            # Top 3 cursos relacionados (do mês)
+            cursos = [
+                str(c) for c in sub["Curso"].value_counts().head(3).index.tolist()
+                if not pd.isna(c)
+            ]
+
+            # Fontes do mês
+            fontes = []
+            for fonte, sub_f in sub.groupby("Fonte"):
+                if pd.isna(fonte):
+                    continue
+                l = len(sub_f)
+                mq = int((sub_f["Class"] == "MQL").sum())
+                cf = busca_custo_camp_fonte(campanha, str(fonte))
+
+                # Criativos do mês (utm_content)
+                criativos = []
+                for crt, sub_c in sub_f.groupby("utm_content"):
+                    if pd.isna(crt) or not str(crt).strip():
+                        continue
+                    cl = len(sub_c)
+                    cm = int((sub_c["Class"] == "MQL").sum())
+                    criativos.append({
+                        "criativo": str(crt),
+                        "leads": cl,
+                        "mqls": cm,
+                        "pct_mql": to_pct(cm, cl),
+                        "custo": 0.0,
+                    })
+                criativos.sort(key=lambda x: x["pct_mql"], reverse=True)
+                fontes.append({
+                    "fonte": str(fonte),
+                    "leads": l,
+                    "mqls": mq,
+                    "pct_mql": to_pct(mq, l),
+                    "custo": round(cf, 2),
+                    "criativos": criativos,
+                })
+            fontes.sort(key=lambda x: x["leads"], reverse=True)
+
+            campanhas.append({
+                "campanha": campanha,
+                "leads": leads_c,
+                "mqls": mqls_c,
+                "pct_mql": to_pct(mqls_c, leads_c),
+                "custo": round(custo_c, 2),
+                "cursos": cursos,
+                "fontes": fontes,
+            })
+
+        campanhas.sort(key=lambda x: x["leads"], reverse=True)
+        out.append({"periodo": m, "ano": ano, "mes": mes, "campanhas": campanhas})
+    return out
+
+
 def por_fonte_mensal(rd: pd.DataFrame, inv: pd.DataFrame, grupo: str) -> list:
     """Para cada mês, lista as fontes com leads/MQLs/custo (permite filtro temporal do JS)."""
     rd_g = rd[rd["Grupo"] == grupo].copy()
@@ -1684,6 +1816,10 @@ def main():
     topo_cfm = campanhas_por_fonte_mensal(rd, inv, "Topo")
     fundo_cfm = campanhas_por_fonte_mensal(rd, inv, "Fundo")
 
+    log("Árvore mensal Campanha→Fonte→Criativo (Galeria filtrável)...")
+    topo_arvore = campanhas_arvore_mensal(rd, inv, "Topo")
+    fundo_arvore = campanhas_arvore_mensal(rd, inv, "Fundo")
+
     log("Coletando filtros disponíveis...")
     filtros = filtros_disponiveis(rd, inv, neg)
 
@@ -1723,6 +1859,7 @@ def main():
             "por_fonte_mensal": topo_pfm,
             "campanhas_mensal": topo_cm,
             "campanhas_por_fonte_mensal": topo_cfm,
+            "campanhas_arvore_mensal": topo_arvore,
         },
         "fundo": {
             "kpis": fundo_kpis,
@@ -1741,6 +1878,7 @@ def main():
             "por_fonte_mensal": fundo_pfm,
             "campanhas_mensal": fundo_cm,
             "campanhas_por_fonte_mensal": fundo_cfm,
+            "campanhas_arvore_mensal": fundo_arvore,
         },
         "atribuicao": {
             "modelo": "Crédito de assistência (Topo ajuda, Fundo fecha) — sem limite de tempo",
