@@ -11,6 +11,7 @@ const STATE = {
   filtro: { ano: 'all', mes: 'all', dia: 'all', range: null },
   tipoCurso: 'all',         // all | mba | pos | imersoes
   cursos: [],               // multi-select de cursos específicos; vazio = todos
+  visaoOrigem: false,       // false = data do evento (padrão); true = data de conversão de origem
   selecao: null,
   busca: { ranking: '', tabela: '', cursos: '' },
   sortTabela: { col: 'leads', dir: 'desc' },
@@ -618,6 +619,24 @@ function setupFiltros() {
       renderAll();
     };
   });
+
+  // ============================================================
+  // Toggle de VISÃO temporal (evento × origem)
+  // ============================================================
+  const btnVisao = document.getElementById('btnVisaoOrigem');
+  if (btnVisao) {
+    const aplicaVisao = () => {
+      btnVisao.classList.toggle('origem', STATE.visaoOrigem);
+      btnVisao.querySelector('.vt-label').textContent =
+        STATE.visaoOrigem ? 'Data de conversão (origem)' : 'Data do evento';
+    };
+    aplicaVisao();
+    btnVisao.onclick = () => {
+      STATE.visaoOrigem = !STATE.visaoOrigem;
+      aplicaVisao();
+      renderAll();
+    };
+  }
 }
 function clearPresets() { document.querySelectorAll('.preset').forEach(b => b.classList.remove('active')); }
 
@@ -653,6 +672,17 @@ function calcFunilTopoFiltrado() {
 // ============================================================
 // CÁLCULO KPIs FILTRADOS
 // ============================================================
+// Retorna a série mensal ativa (padrão ou por origem) conforme o toggle de visão.
+// Leads/MQLs/Custo são idênticos nas duas; só Reuniões/Ganhos/Faturamento mudam.
+function getMensal() {
+  const tab = STATE.data[STATE.tab];
+  return (STATE.visaoOrigem && tab.mensal_origem) ? tab.mensal_origem : tab.mensal;
+}
+function getPorTipoMensal() {
+  const tab = STATE.data[STATE.tab];
+  return (STATE.visaoOrigem && tab.por_tipo_mensal_origem) ? tab.por_tipo_mensal_origem : tab.por_tipo_mensal;
+}
+
 function calcKpisFiltrados() {
   const tab = STATE.data[STATE.tab];
   const { ano, mes, dia } = STATE.filtro;
@@ -720,8 +750,9 @@ function calcKpisFiltrados() {
 
     // === Reuniões, Ganhos, Faturamento: vem do agregado por tipo ===
     let financeiro = { reunioes: null, ganhos: null, faturamento: null };
-    if (tab.por_tipo_mensal && tab.por_tipo_mensal.length) {
-      let rowsT = tab.por_tipo_mensal
+    const ptm = getPorTipoMensal();
+    if (ptm && ptm.length) {
+      let rowsT = ptm
         .filter(r => r.tipo === tipo)
         .filter(r => tupleAtivo(r.ano, r.mes));
       financeiro = rowsT.reduce((a, c) => ({
@@ -760,7 +791,7 @@ function calcKpisFiltrados() {
     if (!row) return baseKpisZero();
     // Estimativa proporcional de Reuniões Qualificadas para o dia (regra de 3 sobre o mês)
     const anoN = parseInt(ano, 10), mesN = parseInt(mesUnico, 10);
-    const mesInt = (tab.mensal || []).find(x => x.ano === anoN && x.mes === mesN);
+    const mesInt = (getMensal() || []).find(x => x.ano === anoN && x.mes === mesN);
     const diasNoMes = new Date(anoN, mesN, 0).getDate();
     const reunioesEst = mesInt && diasNoMes ? Math.round((mesInt.reunioes_qualificadas || 0) / diasNoMes) : 0;
     return {
@@ -780,7 +811,7 @@ function calcKpisFiltrados() {
   }
 
   // Agrega meses respeitando filtros Ano/Mês (mes pode ser array)
-  let meses = (tab.mensal || []).filter(m => tupleAtivo(m.ano, m.mes));
+  let meses = (getMensal() || []).filter(m => tupleAtivo(m.ano, m.mes));
   // Se houver dias selecionados (multi) OU range customizado, agrega via diário
   if ((diasSel && diasSel.length) || STATE.filtro.range) {
     const dias = (tab.diario || []).filter(d => {
@@ -875,7 +906,7 @@ function calcKpisPeriodo({ ano, mes, diaInicio = null, diaFim = null }) {
   // (mantém comparativo apples-to-apples proporcional: "o que seria o mês passado neste mesmo
   //  ponto do mês se o ritmo fosse constante?")
   if (diaInicio != null && diaFim != null) {
-    const mesInt = (tab.mensal || []).find(x => x.ano === ano && x.mes === mes);
+    const mesInt = (getMensal() || []).find(x => x.ano === ano && x.mes === mes);
     const diasNoMes = new Date(ano, mes, 0).getDate();    // último dia do mês
     const diasRecorte = diaFim - diaInicio + 1;
     const propor = diasNoMes ? (diasRecorte / diasNoMes) : 0;
@@ -927,7 +958,7 @@ function calcKpisPeriodo({ ano, mes, diaInicio = null, diaFim = null }) {
   }
 
   // Mês completo → detalhamento mensal
-  const m = (tab.mensal || []).find(x => x.ano === ano && x.mes === mes);
+  const m = (getMensal() || []).find(x => x.ano === ano && x.mes === mes);
   if (!m) return null;
   return {
     leads: m.leads, mqls: m.mqls, custo: m.custo,
@@ -1026,7 +1057,7 @@ function calcKpisAnoAnterior() {
   const tab = STATE.data[STATE.tab];
 
   // Confirma que existe dado do ano anterior
-  const temDadosAnoAnt = (tab.mensal || []).some(m => m.ano === anoAnt);
+  const temDadosAnoAnt = (getMensal() || []).some(m => m.ano === anoAnt);
   if (!temDadosAnoAnt) return null;
 
   // Dia específico → mesmo dia do ano anterior
@@ -1049,7 +1080,7 @@ function calcKpisAnoAnterior() {
   }
 
   // Ano completo → soma todos meses do ano anterior
-  const meses = (tab.mensal || []).filter(x => x.ano === anoAnt);
+  const meses = (getMensal() || []).filter(x => x.ano === anoAnt);
   if (!meses.length) return null;
   const acc = meses.reduce((a, x) => ({
     leads: a.leads + x.leads, mqls: a.mqls + x.mqls,

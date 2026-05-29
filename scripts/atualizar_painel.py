@@ -923,6 +923,208 @@ def por_tipo_curso_mensal(rd, neg_classificado, ativ, grupo, atribuicao) -> list
 
 
 # ----------------------------------------------------------------------------
+# VISÃO POR ORIGEM — re-data reuniões/vendas para o mês da ÚLTIMA conversão
+# do lead ANTES do evento (resolve distorção de atribuição temporal).
+# Sem match de email no RD → mantém no mês do evento (visão híbrida).
+# ----------------------------------------------------------------------------
+def _indice_conversoes_por_email(rd: pd.DataFrame) -> dict:
+    """email_norm -> lista ORDENADA de Timestamps de conversão."""
+    rc = rd[["E-mail Lead", "Data da Conversão"]].dropna(
+        subset=["E-mail Lead", "Data da Conversão"]
+    ).copy()
+    rc["email"] = rc["E-mail Lead"].astype(str).str.lower().str.strip()
+    rc = rc[rc["email"] != ""]
+    idx = {}
+    for email, d in zip(rc["email"], rc["Data da Conversão"]):
+        idx.setdefault(email, []).append(d)
+    for e in idx:
+        idx[e].sort()
+    return idx
+
+
+def _emails_do_negocio(row) -> list:
+    out = []
+    for col in ["Pessoa - E-mail - Trabalho", "Pessoa - E-mail - Outros"]:
+        val = row.get(col)
+        if pd.notna(val):
+            e = str(val).lower().strip()
+            if e and e != "nan":
+                for sub in e.replace(";", ",").split(","):
+                    sub = sub.strip()
+                    if sub:
+                        out.append(sub)
+    return out
+
+
+def _ultima_conv_antes(idx: dict, emails: list, data_ref):
+    """Timestamp da última conversão <= data_ref entre os emails; None se não houver."""
+    if pd.isna(data_ref):
+        return None
+    melhor = None
+    for e in emails:
+        for d in idx.get(e, []):
+            if d <= data_ref and (melhor is None or d > melhor):
+                melhor = d
+    return melhor
+
+
+def _mapa_emails_negocio(neg: pd.DataFrame) -> dict:
+    """deal_id (int) -> lista de emails."""
+    return {int(r["Negócio - ID"]): _emails_do_negocio(r) for _, r in neg.iterrows()}
+
+
+def detalhamento_mensal_origem(rd, inv, neg, ativ, grupo, atribuicao) -> list:
+    """Igual a detalhamento_mensal, mas reuniões e ganhos são bucketados pelo
+    mês da última conversão do lead ANTES do evento (origem). Sem match → mês do evento.
+    Leads/MQLs/Custo continuam por Data da Conversão (não mudam)."""
+    idx = _indice_conversoes_por_email(rd)
+    neg_emails = _mapa_emails_negocio(neg)
+    rd_g = rd[rd["Grupo"] == grupo].copy()
+    inv_g = inv[inv["Grupo"] == grupo].copy()
+
+    if grupo == "Fundo":
+        ganhos_ids = atribuicao["fundo"]["ganhos_neg_ids"]
+        rqs_ref = set(
+            neg.loc[neg["Negócio - Qualificação/Feedback:"].isin(["Qualificação OK", "Check Liderança"]),
+                    "Negócio - ID"].astype(int)
+        )
+    else:
+        ganhos_ids = atribuicao["topo"]["assistencia_neg_ids"]
+        rqs_ref = atribuicao["topo"]["reunioes_assistidas_ids"]
+
+    def origem_anomes(deal_id, data_evento):
+        d = _ultima_conv_antes(idx, neg_emails.get(int(deal_id), []), data_evento)
+        if d is None or pd.isna(d):
+            d = data_evento  # sem match → mês do evento
+        if pd.isna(d):
+            return None
+        return f"{d.year:04d}-{d.month:02d}"
+
+    # Reuniões concluídas em negócios de referência
+    ativ_reu = ativ[
+        ativ["Atividade - Tipo"].str.contains("Reunião", case=False, na=False)
+        & (ativ["Atividade - Concluído"] == "Concluído")
+    ].copy()
+    ativ_reu["data_atv"] = ativ_reu["Atividade - Data adicionada"].fillna(
+        ativ_reu["Atividade - Data e hora de conclusão"]
+    ).fillna(ativ_reu["Atividade - Atualizado em"])
+    ativ_reu = ativ_reu[ativ_reu["Negócio - ID"].astype(int).isin(rqs_ref)]
+    ativ_reu["AnoMes"] = [origem_anomes(did, dev)
+                          for did, dev in zip(ativ_reu["Negócio - ID"], ativ_reu["data_atv"])]
+
+    # Ganhos atribuídos ao grupo
+    neg_ganho = neg[neg["Negócio - Status"] == "Ganho"].copy()
+    neg_ganho = neg_ganho[neg_ganho["Negócio - ID"].astype(int).isin(ganhos_ids)]
+    neg_ganho["AnoMes"] = [origem_anomes(did, dev)
+                           for did, dev in zip(neg_ganho["Negócio - ID"], neg_ganho["Negócio - Ganho em"])]
+
+    rd_g["AnoMesConv"] = rd_g["Data da Conversão"].dt.to_period("M").astype(str)
+    meses = sorted(
+        set(rd_g["AnoMesConv"].dropna())
+        | set(x for x in ativ_reu["AnoMes"] if x)
+        | set(x for x in neg_ganho["AnoMes"] if x)
+    )
+
+    out = []
+    for m in meses:
+        try:
+            ano, mes = m.split("-"); ano, mes = int(ano), int(mes)
+        except Exception:
+            continue
+        rd_m = rd_g[rd_g["AnoMesConv"] == m]
+        inv_m = inv_g[(inv_g["Data"].dt.year == ano) & (inv_g["Data"].dt.month == mes)]
+        rqs_m = int((ativ_reu["AnoMes"] == m).sum())
+        neg_m = neg_ganho[neg_ganho["AnoMes"] == m]
+
+        leads = len(rd_m)
+        mqls = int((rd_m["Class"] == "MQL").sum())
+        custo = float(inv_m["Custo"].sum())
+        ganhos = len(neg_m)
+        faturamento = float(neg_m["Negócio - Valor"].sum())
+
+        out.append({
+            "periodo": m, "ano": ano, "mes": mes,
+            "leads": leads, "mqls": mqls, "pct_mql": to_pct(mqls, leads),
+            "custo": round(custo, 2),
+            "cpl": round(safe_div(custo, leads), 2),
+            "cpmql": round(safe_div(custo, mqls), 2),
+            "reunioes_qualificadas": rqs_m,
+            "ganhos": ganhos,
+            "faturamento": round(faturamento, 2),
+            "ticket_medio": round(safe_div(faturamento, ganhos), 2),
+        })
+    return out
+
+
+def por_tipo_curso_mensal_origem(rd, neg_classificado, ativ, grupo, atribuicao) -> list:
+    """Igual a por_tipo_curso_mensal, mas reuniões/ganhos bucketados por origem
+    (última conversão antes do evento). Sem match → mês do evento."""
+    n = neg_classificado
+    idx = _indice_conversoes_por_email(rd)
+    neg_emails = _mapa_emails_negocio(n)
+
+    if grupo == "Fundo":
+        ganhos_ids = atribuicao["fundo"]["ganhos_neg_ids"]
+        reu_ref_ids = set(
+            n.loc[n["Negócio - Qualificação/Feedback:"].isin(["Qualificação OK", "Check Liderança"]),
+                  "Negócio - ID"].astype(int)
+        )
+    else:
+        ganhos_ids = atribuicao["topo"]["assistencia_neg_ids"]
+        reu_ref_ids = atribuicao["topo"]["reunioes_assistidas_ids"]
+
+    def origem_anomes(deal_id, data_evento):
+        d = _ultima_conv_antes(idx, neg_emails.get(int(deal_id), []), data_evento)
+        if d is None or pd.isna(d):
+            d = data_evento
+        if pd.isna(d):
+            return None
+        return f"{d.year:04d}-{d.month:02d}"
+
+    neg_tipo_map = dict(zip(n["Negócio - ID"].astype(int), n["_tipo"]))
+
+    neg_ganho = n[(n["Negócio - Status"] == "Ganho")
+                  & (n["Negócio - ID"].astype(int).isin(ganhos_ids))].copy()
+    neg_ganho["AnoMes"] = [origem_anomes(did, dev)
+                           for did, dev in zip(neg_ganho["Negócio - ID"], neg_ganho["Negócio - Ganho em"])]
+
+    ativ_reu = ativ[
+        ativ["Atividade - Tipo"].str.contains("Reunião", case=False, na=False)
+        & (ativ["Atividade - Concluído"] == "Concluído")
+    ].copy()
+    ativ_reu = ativ_reu[ativ_reu["Negócio - ID"].astype(int).isin(reu_ref_ids)]
+    ativ_reu["_tipo"] = ativ_reu["Negócio - ID"].astype(int).map(neg_tipo_map).fillna("outros")
+    ativ_reu["data_atv"] = ativ_reu["Atividade - Data adicionada"].fillna(
+        ativ_reu["Atividade - Data e hora de conclusão"]
+    ).fillna(ativ_reu["Atividade - Atualizado em"])
+    ativ_reu["AnoMes"] = [origem_anomes(did, dev)
+                          for did, dev in zip(ativ_reu["Negócio - ID"], ativ_reu["data_atv"])]
+
+    out = []
+    meses_universo = sorted(
+        set(x for x in neg_ganho["AnoMes"] if x) | set(x for x in ativ_reu["AnoMes"] if x)
+    )
+    for tipo in ["mba", "pos", "imersoes", "outros"]:
+        for m in meses_universo:
+            try:
+                ano, mes = m.split("-"); ano, mes = int(ano), int(mes)
+            except Exception:
+                continue
+            g_m = neg_ganho[(neg_ganho["AnoMes"] == m) & (neg_ganho["_tipo"] == tipo)]
+            r_m = ativ_reu[(ativ_reu["AnoMes"] == m) & (ativ_reu["_tipo"] == tipo)]
+            ganhos = len(g_m); reunioes = len(r_m)
+            faturamento = float(g_m["Negócio - Valor"].sum())
+            if ganhos == 0 and reunioes == 0 and faturamento == 0:
+                continue
+            out.append({
+                "ano": ano, "mes": mes, "tipo": tipo,
+                "reunioes": reunioes, "ganhos": ganhos,
+                "faturamento": round(faturamento, 2),
+            })
+    return out
+
+
+# ----------------------------------------------------------------------------
 # Agregado por Curso × Mês — corrige E6-01 (filtro Tipo + Data ignorava data)
 # Permite que o JS combine filtro de tipo de curso COM recorte temporal
 # ----------------------------------------------------------------------------
@@ -1837,6 +2039,12 @@ def main():
     topo_mes = detalhamento_mensal(rd, inv, neg, ativ, "Topo", atribuicao)
     fundo_mes = detalhamento_mensal(rd, inv, neg, ativ, "Fundo", atribuicao)
 
+    log("Detalhamento mensal POR ORIGEM (reuniões/vendas re-datadas)...")
+    topo_mes_origem = detalhamento_mensal_origem(rd, inv, neg, ativ, "Topo", atribuicao)
+    fundo_mes_origem = detalhamento_mensal_origem(rd, inv, neg, ativ, "Fundo", atribuicao)
+    topo_por_tipo_mensal_origem = por_tipo_curso_mensal_origem(rd, neg_classificado, ativ, "Topo", atribuicao)
+    fundo_por_tipo_mensal_origem = por_tipo_curso_mensal_origem(rd, neg_classificado, ativ, "Fundo", atribuicao)
+
     log("Detalhamento diário (Topo e Fundo)...")
     topo_dia = detalhamento_diario(rd, inv, neg, "Topo", atribuicao)
     fundo_dia = detalhamento_diario(rd, inv, neg, "Fundo", atribuicao)
@@ -1889,6 +2097,8 @@ def main():
             "por_curso_mensal": topo_por_curso_mensal,
             "por_curso_diario": topo_por_curso_diario,
             "por_tipo_mensal": topo_por_tipo_mensal,
+            "mensal_origem": topo_mes_origem,
+            "por_tipo_mensal_origem": topo_por_tipo_mensal_origem,
             "funil": topo_funil,
             "funil_assistencia": topo_funil_assist,  # novo funil de 6 etapas
             "financeiro": topo_fin,
@@ -1910,6 +2120,8 @@ def main():
             "por_curso_mensal": fundo_por_curso_mensal,
             "por_curso_diario": fundo_por_curso_diario,
             "por_tipo_mensal": fundo_por_tipo_mensal,
+            "mensal_origem": fundo_mes_origem,
+            "por_tipo_mensal_origem": fundo_por_tipo_mensal_origem,
             "funil": fundo_funil,
             "financeiro": fundo_fin,
             "mensal": fundo_mes,
