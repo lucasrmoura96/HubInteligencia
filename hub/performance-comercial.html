@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Comercial · Agroadvance</title>
+  <link rel="stylesheet" href="assets/css/theme.css" />
+  <script src="assets/vendor/chart.umd.js"></script>
+  <!-- Dados CIFRADOS da área comercial (AES-256-GCM) -->
+  <script src="dados/performance_comercial_enc.js" onerror="console.warn('Rode Atualizar HUB MKT.bat')"></script>
+  <script src="assets/js/auth.js"></script>
+</head>
+<body>
+
+<div class="app">
+  <main class="main">
+
+    <!-- Topbar -->
+    <div class="topbar">
+      <a class="home-mark brand-logo" href="index.html" aria-label="Agroadvance">
+        <img src="assets/img/LogoAgro.png" alt="Agroadvance" class="brand-logo-img" />
+      </a>
+      <h1>Comercial · Performance</h1>
+      <a class="area-back" href="index.html" aria-label="Voltar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </a>
+    </div>
+
+    <!-- FILTROS (padrão MKT) -->
+    <div class="filter-bar">
+      <span class="fb-label">Período</span>
+      <select id="cAno" aria-label="Ano"></select>
+      <div id="cMesWrap" class="ms-dropdown"></div>
+      <div id="cDiaWrap" class="ms-dropdown"></div>
+      <button class="preset" data-preset="all">Tudo</button>
+      <button class="preset" data-preset="ytd">YTD</button>
+      <button class="preset" data-preset="month">Mês atual</button>
+      <button class="preset" data-preset="today">Hoje</button>
+      <div class="range-wrap" id="cRangeWrap">
+        <button class="preset preset-range" id="cBtnPers" type="button">Personalizado</button>
+        <div class="range-panel" id="cRangePanel" hidden>
+          <label class="range-field"><span>De</span><input type="date" id="cRangeDe" /></label>
+          <label class="range-field"><span>Até</span><input type="date" id="cRangeAte" /></label>
+          <button class="range-apply" id="cRangeApply" type="button">Aplicar</button>
+          <button class="range-clear" id="cRangeClear" type="button">Limpar</button>
+        </div>
+      </div>
+      <button class="btn-clear" id="cClear">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        Limpar
+      </button>
+      <span class="sec-hint" id="cHint"></span>
+    </div>
+
+    <!-- §01 KPIs -->
+    <section class="section">
+      <div class="section-head">
+        <div class="sec-left"><h2>Indicadores de Vendas</h2></div>
+        <span class="sec-hint" id="cKpiHint"></span>
+      </div>
+      <div class="kpi-grid" id="cKpiGrid"></div>
+    </section>
+
+    <!-- §02 Evolução mensal -->
+    <section class="section">
+      <div class="section-head">
+        <div class="sec-left"><h2 id="cSerieTitle">Evolução mensal</h2></div>
+        <span class="sec-hint">Criados · Ganhos · Faturamento</span>
+      </div>
+      <div class="chart-box"><canvas id="cChartSerie"></canvas></div>
+    </section>
+
+    <!-- §03 Funil comercial -->
+    <section class="section">
+      <div class="section-head">
+        <div class="sec-left"><h2>Funil comercial</h2></div>
+        <span class="sec-hint">Criado → Qualificado → Reunião → Proposta → Ganho</span>
+      </div>
+      <div class="com-funil" id="cFunil"></div>
+    </section>
+
+    <!-- §04 Ranking de Closers -->
+    <section class="section">
+      <div class="section-head">
+        <div class="sec-left"><h2>Ranking de Closers</h2></div>
+        <span class="sec-hint" id="cClosersHint"></span>
+      </div>
+      <div class="rank-table-wrap" id="cClosers"></div>
+    </section>
+
+    <!-- §05 Ranking de SDRs -->
+    <section class="section">
+      <div class="section-head">
+        <div class="sec-left"><h2>Ranking de SDRs</h2></div>
+        <span class="sec-hint">Qualificações · Reuniões · No-show (automação à parte)</span>
+      </div>
+      <div class="rank-table-wrap" id="cSdrs"></div>
+    </section>
+
+    <!-- §06 Reuniões Qualificadas por dia × SDR (matriz) -->
+    <section class="section">
+      <div class="section-head">
+        <div class="sec-left"><h2>Reuniões Qualificadas · SDR × Dia</h2></div>
+        <select id="cSelSdr" class="sel-inline" aria-label="SDR"></select>
+      </div>
+      <div class="hm-scroll"><div id="cReunDiaInner"></div></div>
+    </section>
+
+    <!-- §07 Vendas por dia × Closer (matriz) -->
+    <section class="section">
+      <div class="section-head">
+        <div class="sec-left"><h2>Vendas · Closer × Dia <small style="font-weight:400;color:var(--text-soft)">(passe o mouse p/ faturamento)</small></h2></div>
+        <select id="cSelCloser" class="sel-inline" aria-label="Closer"></select>
+      </div>
+      <div class="hm-scroll"><div id="cVendaDiaInner"></div></div>
+    </section>
+
+    <!-- §08 Reuniões e Vendas por Curso (closer × curso) -->
+    <section class="section">
+      <div class="section-head">
+        <div class="sec-left"><h2>Reuniões e Vendas por Curso</h2></div>
+        <select id="cSelCurso" class="sel-inline" aria-label="Curso"></select>
+      </div>
+      <div class="rank-table-wrap" id="cCloserCurso"></div>
+    </section>
+
+  </main>
+</div>
+
+<div class="toast-area" id="toastArea"></div>
+
+<script src="assets/js/comercial.js"></script>
+
+</body>
+</html>

@@ -49,11 +49,11 @@ AREAS = {
         "saida": DADOS / "performance_mkt_enc.js",
         "var": "PAINEL_ENC_MKT",
     },
-    # "comercial": {
-    #     "fonte": DADOS / "performance_comercial.json",
-    #     "saida": DADOS / "performance_comercial_enc.js",
-    #     "var": "PAINEL_ENC_COMERCIAL",
-    # },
+    "comercial": {
+        "fonte": DADOS / "performance_comercial.json",
+        "saida": DADOS / "performance_comercial_enc.js",
+        "var": "PAINEL_ENC_COMERCIAL",
+    },
 }
 
 

@@ -1,0 +1,10 @@
+name = "hub-ia-agroadvance"
+main = "worker.js"
+compatibility_date = "2026-05-29"
+
+[vars]
+ALLOWED_ORIGIN = "https://lucasrmoura96.github.io"
+
+# Segredos (NÃO ficam aqui — são definidos via `wrangler secret put`):
+#   OPENAI_API_KEY  -> sua chave sk-... da OpenAI
+#   HUB_TOKEN       -> token compartilhado (já gerado, ver insight.js)

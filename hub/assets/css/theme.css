@@ -1333,6 +1333,282 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 .hub-login-back:hover { color: var(--text); }
 
 /* ============================================================
+   BOTÃO + MODAL "Coletar insight IA"
+   ============================================================ */
+.sec-right { display: inline-flex; align-items: center; gap: var(--space-3); }
+
+.btn-insight {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--font-display);
+  font-size: 0.76rem; font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 8px 15px;
+  color: #fff; border: 0;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(135deg, #6d28d9, #9333ea 55%, #c026d3);
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(147, 51, 234, 0.30);
+  transition: transform var(--t-base) var(--ease-apple), box-shadow var(--t-base), opacity var(--t-base);
+}
+.btn-insight:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(147, 51, 234, 0.42); }
+.btn-insight:active { transform: translateY(0); }
+.btn-insight:disabled { opacity: 0.6; cursor: wait; }
+.btn-insight .bi-spark { font-size: 0.9em; }
+
+.insight-overlay {
+  position: fixed; inset: 0; z-index: 9998;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(3px);
+}
+.insight-overlay.hidden { display: none; }
+.insight-card {
+  width: 100%; max-width: 680px; max-height: 86vh;
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  box-shadow: 0 28px 70px rgba(0,0,0,0.40);
+  animation: msFadeIn 0.2s var(--ease-apple);
+  overflow: hidden;
+}
+.insight-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, rgba(109,40,217,0.10), rgba(192,38,211,0.06));
+}
+.insight-title {
+  font-family: var(--font-display);
+  font-size: 1.02rem; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.insight-period { font-size: 0.74rem; font-weight: 500; color: var(--text-muted); }
+.insight-actions { display: inline-flex; align-items: center; gap: 8px; }
+.insight-copy {
+  font-family: var(--font-display); font-size: 0.7rem; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 6px 12px; border-radius: var(--radius-sm);
+  background: transparent; border: 1px solid var(--border-strong);
+  color: var(--text-muted); cursor: pointer; transition: all var(--t-base);
+}
+.insight-copy:hover { color: var(--text); border-color: var(--text); }
+.insight-close {
+  background: transparent; border: 0; cursor: pointer;
+  font-size: 1.1rem; color: var(--text-muted); line-height: 1;
+  padding: 6px 8px; border-radius: var(--radius-sm); transition: color var(--t-base);
+}
+.insight-close:hover { color: var(--text); }
+.insight-body {
+  padding: 20px 22px;
+  overflow-y: auto;
+  line-height: 1.55;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+.insight-body h3 {
+  font-family: var(--font-display);
+  font-size: 0.82rem; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--brand-600, #6d28d9);
+  margin: 18px 0 8px;
+}
+.insight-body h3:first-child { margin-top: 0; }
+.insight-body ul { margin: 0 0 10px; padding-left: 20px; }
+.insight-body li { margin-bottom: 5px; }
+.insight-body p { margin: 0 0 10px; }
+.insight-body strong { font-weight: 700; }
+.insight-loading { text-align: center; padding: 40px 0; color: var(--text-muted); }
+.insight-spinner {
+  width: 34px; height: 34px; margin: 0 auto 14px;
+  border: 3px solid var(--border);
+  border-top-color: #9333ea;
+  border-radius: 50%;
+  animation: insightSpin 0.8s linear infinite;
+}
+@keyframes insightSpin { to { transform: rotate(360deg); } }
+.insight-erro {
+  padding: 16px; border-radius: 10px;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.25);
+  color: var(--text); font-size: 0.88rem; line-height: 1.5;
+}
+.insight-erro code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+@media (max-width: 560px) {
+  .sec-right { flex-direction: column; align-items: flex-end; gap: 6px; }
+}
+
+/* ============================================================
+   PAINEL COMERCIAL
+   ============================================================ */
+.topbar {
+  display: flex; align-items: center; gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+.topbar h1 {
+  font-family: var(--font-display);
+  font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em;
+  flex: 1;
+}
+.topbar .area-back {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 50%;
+  border: 1px solid var(--border); color: var(--text-muted);
+  transition: all var(--t-base);
+}
+.topbar .area-back:hover { color: var(--text); border-color: var(--border-strong); }
+
+.chart-box {
+  position: relative; height: 320px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: var(--space-4);
+}
+
+/* Funil comercial — CENTRALIZADO em forma de funil */
+.com-funil {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: var(--space-6) var(--space-5);
+  display: flex; flex-direction: column; align-items: center; gap: 0;
+}
+.fv-stage {
+  display: flex; align-items: center; justify-content: space-between;
+  min-width: 120px; max-width: 100%;
+  padding: 14px 22px; border-radius: 10px;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+  transition: width 0.5s var(--ease-apple);
+}
+.fv-stage .fv-nome { font-family: var(--font-display); font-weight: 700; font-size: 0.9rem; letter-spacing: -0.01em; }
+.fv-stage .fv-val { font-family: var(--font-mono); font-weight: 700; font-size: 1.15rem; display: inline-flex; align-items: baseline; gap: 8px; }
+.fv-stage .fv-fat { font-size: 0.78rem; font-weight: 600; opacity: 0.9; }
+.fv-conn {
+  font-family: var(--font-mono); font-size: 0.74rem; font-weight: 600;
+  color: var(--text-muted); padding: 7px 0; text-align: center;
+}
+@media (max-width: 560px) {
+  .fv-stage { padding: 11px 14px; flex-direction: column; gap: 2px; align-items: center; }
+  .fv-stage .fv-nome { font-size: 0.78rem; }
+}
+
+/* Tabelas de ranking */
+.rank-table-wrap {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); overflow: hidden;
+}
+.rank-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+.rank-table thead th {
+  text-align: left; padding: 12px var(--space-3);
+  font-family: var(--font-display); font-size: 0.64rem; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);
+  background: var(--surface-2); border-bottom: 1px solid var(--border);
+}
+.rank-table th.num, .rank-table td.num { text-align: right; font-family: var(--font-mono); }
+.rank-table tbody td { padding: 11px var(--space-3); border-bottom: 1px solid var(--border); }
+.rank-table tbody tr:last-child td { border-bottom: 0; }
+.rank-table tbody tr:hover { background: var(--surface-2); }
+.rank-table .pos { font-weight: 700; color: var(--text-muted); width: 44px; }
+.rank-table .nome { font-weight: 600; color: var(--text); }
+.rank-table tr.top3 .nome { color: var(--brand-600, #1a8f37); }
+.rank-table tr.is-bot { opacity: 0.62; font-style: italic; }
+.sdr-tag {
+  display: inline-block; margin-left: 6px;
+  font-family: var(--font-display); font-size: 0.58rem; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: var(--radius-pill);
+}
+.sdr-tag.bot { background: rgba(147,51,234,0.14); color: #9333ea; }
+.sdr-tag.sem { background: var(--surface-2); color: var(--text-soft); }
+.kpi-cell.alert .kpi-value { color: var(--negative); }
+
+/* Grid secundário de KPIs do comercial */
+.kpi-grid-sec {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+@media (max-width: 1100px) { .kpi-grid-sec { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 560px)  { .kpi-grid-sec { grid-template-columns: repeat(2, 1fr); } }
+
+.cf-nome small { color: var(--text-soft); font-weight: 400; }
+
+/* Pódio dos top closers */
+.podio {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3);
+  padding: var(--space-4); border-bottom: 1px solid var(--border);
+}
+@media (max-width: 620px) { .podio { grid-template-columns: 1fr; } }
+.podio-card {
+  position: relative; text-align: center;
+  padding: 18px 14px 16px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface-2);
+  transition: transform var(--t-base), box-shadow var(--t-base), border-color var(--t-base);
+}
+.podio-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.10); }
+.podio-card.sel { border-color: var(--brand-500); box-shadow: 0 0 0 2px rgba(31,181,65,0.25); }
+.podio-card.gold   { border-top: 3px solid #d4af37; }
+.podio-card.silver { border-top: 3px solid #9ca3af; }
+.podio-card.bronze { border-top: 3px solid #b87333; }
+.podio-medal { font-size: 1.4rem; position: absolute; top: 10px; right: 12px; }
+.podio-ini {
+  width: 48px; height: 48px; margin: 0 auto 8px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-display); font-weight: 700; font-size: 1.05rem;
+  color: #fff; background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
+}
+.podio-nome { font-family: var(--font-display); font-weight: 700; font-size: 0.92rem; color: var(--text); }
+.podio-fat { font-family: var(--font-mono); font-weight: 700; font-size: 1.05rem; color: var(--brand-600, #1a8f37); margin-top: 4px; }
+.podio-sub { font-size: 0.74rem; color: var(--text-muted); margin-top: 2px; }
+.rank-table tr.sel { background: rgba(31,181,65,0.10); }
+
+/* Select inline no cabeçalho das seções comerciais */
+.sel-inline {
+  font-family: var(--font-mono); font-size: 0.8rem; font-weight: 500;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px 28px 6px 10px;
+  color: var(--text); cursor: pointer; outline: none; appearance: none;
+  max-width: 260px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236e6e73' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center;
+  transition: border-color var(--t-base);
+}
+.sel-inline:hover { border-color: var(--border-strong); }
+
+/* Heatmap (matriz pessoa × dia) */
+.hm-scroll {
+  overflow-x: auto; overflow-y: hidden;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+}
+.hm-scroll::-webkit-scrollbar { height: 8px; }
+.hm-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+.hm-table { border-collapse: separate; border-spacing: 0; font-family: var(--font-mono); font-size: 0.78rem; }
+.hm-table th, .hm-table td { padding: 5px 7px; text-align: center; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.hm-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--surface-2); color: var(--text-muted);
+  font-family: var(--font-display); font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border-strong);
+}
+.hm-table .hm-name {
+  position: sticky; left: 0; z-index: 1;
+  text-align: left; font-family: var(--font-display); font-weight: 600; font-size: 0.8rem;
+  color: var(--text); background: var(--surface); min-width: 150px;
+  border-right: 1px solid var(--border);
+}
+.hm-table thead .hm-name { z-index: 3; background: var(--surface-2); }
+.hm-table .hm-tot {
+  position: sticky; left: 150px; z-index: 1;
+  font-weight: 700; color: var(--text); background: var(--surface);
+  border-right: 2px solid var(--border-strong);
+}
+.hm-table thead .hm-tot { z-index: 3; background: var(--surface-2); }
+.hm-table tbody tr:hover .hm-name,
+.hm-table tbody tr:hover .hm-tot { background: var(--surface-2); }
+.hm-cell { color: var(--text); font-weight: 600; min-width: 30px; }
+.hm-empty { padding: 28px; text-align: center; color: var(--text-muted); }
+
+/* ============================================================
    BANNERS
    ============================================================ */
 .warn-banner {

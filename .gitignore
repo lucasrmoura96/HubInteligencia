@@ -56,4 +56,5 @@ usuarios.local.json
 # Dados em texto puro (entrada da cifragem) — ficam só na máquina local
 hub/dados/performance_mkt.json
 hub/dados/performance_mkt.js
+hub/dados/performance_comercial.json
 # (ultima_atualizacao.json continua público — só tem data, nada sensível)
