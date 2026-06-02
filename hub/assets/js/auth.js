@@ -12,7 +12,15 @@
      const data = await HubAuth.unlock({ key:'mkt', varName:'PAINEL_ENC_MKT', nome:'Performance & Marketing' });
    ============================================================ */
 window.HubAuth = (function () {
-  const DEK_PREFIX = 'hub_dek_';   // sessionStorage: DEK (base64) por área, escopo da aba
+  const DEK_PREFIX = 'hub_dek_';        // sessionStorage: DEK (base64) por área, escopo da aba
+  const REMEMBER_PREFIX = 'hub_cred_';  // localStorage: credenciais (quando "lembrar" marcado)
+
+  // base64 unicode-safe (senhas com acento)
+  const enc64 = (s) => btoa(unescape(encodeURIComponent(s)));
+  const dec64 = (s) => decodeURIComponent(escape(atob(s)));
+  function salvarCred(key, u, p) { try { localStorage.setItem(REMEMBER_PREFIX + key, enc64(JSON.stringify({ u, p }))); } catch (e) {} }
+  function lerCred(key) { try { const r = localStorage.getItem(REMEMBER_PREFIX + key); return r ? JSON.parse(dec64(r)) : null; } catch (e) { return null; } }
+  function limparCred(key) { try { localStorage.removeItem(REMEMBER_PREFIX + key); } catch (e) {} }
 
   function b64ToBuf(b64) {
     const bin = atob(b64);
@@ -76,6 +84,10 @@ window.HubAuth = (function () {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
         </div>
+        <label class="hub-login-remember-wrap">
+          <input type="checkbox" class="hub-login-remember" />
+          <span>Lembrar acesso neste computador</span>
+        </label>
         <div class="hub-login-err"></div>
         <button type="button" class="hub-login-btn">Entrar</button>
         <a class="hub-login-back" href="index.html">← Voltar ao início</a>
@@ -101,15 +113,29 @@ window.HubAuth = (function () {
         return;
       }
 
-      // 1) DEK em cache da sessão -> entra direto
-      const dekCache = sessionStorage.getItem(DEK_PREFIX + cfg.key);
-      if (dekCache) {
-        decryptData(blob, b64ToBuf(dekCache))
+      // 1) Credenciais LEMBRADAS (localStorage) -> auto-login.
+      //    Re-deriva a chave da senha, então sobrevive a re-deploys (chave muda a cada update).
+      const cred = lerCred(cfg.key);
+      if (cred && cred.u && cred.p) {
+        abrirEnvelope(blob, cred.u, cred.p)
+          .then(dek => decryptData(blob, dek))
           .then(resolve)
-          .catch(() => { sessionStorage.removeItem(DEK_PREFIX + cfg.key); pedirLogin(); });
+          .catch(() => { limparCred(cfg.key); tentarSessao(); });
         return;
       }
-      pedirLogin();
+      tentarSessao();
+
+      // 2) DEK em cache da SESSÃO (aba) -> entra direto
+      function tentarSessao() {
+        const dekCache = sessionStorage.getItem(DEK_PREFIX + cfg.key);
+        if (dekCache) {
+          decryptData(blob, b64ToBuf(dekCache))
+            .then(resolve)
+            .catch(() => { sessionStorage.removeItem(DEK_PREFIX + cfg.key); pedirLogin(); });
+          return;
+        }
+        pedirLogin();
+      }
 
       function pedirLogin() {
         const ov = construirOverlay(cfg);
@@ -135,7 +161,12 @@ window.HubAuth = (function () {
           try {
             const dek = await abrirEnvelope(blob, usuario, senha);
             const data = await decryptData(blob, dek);
-            try { sessionStorage.setItem(DEK_PREFIX + cfg.key, bufToB64(dek)); } catch (e) {}
+            const lembrar = ov.querySelector('.hub-login-remember') && ov.querySelector('.hub-login-remember').checked;
+            if (lembrar) {
+              salvarCred(cfg.key, usuario, senha);            // persiste no computador
+            } else {
+              try { sessionStorage.setItem(DEK_PREFIX + cfg.key, bufToB64(dek)); } catch (e) {}  // só na sessão
+            }
             document.documentElement.style.overflow = '';
             ov.remove();
             resolve(data);
@@ -154,8 +185,11 @@ window.HubAuth = (function () {
   }
 
   function logout(key) {
-    if (key) sessionStorage.removeItem(DEK_PREFIX + key);
-    else Object.keys(sessionStorage).filter(k => k.startsWith(DEK_PREFIX)).forEach(k => sessionStorage.removeItem(k));
+    if (key) { sessionStorage.removeItem(DEK_PREFIX + key); limparCred(key); }
+    else {
+      Object.keys(sessionStorage).filter(k => k.startsWith(DEK_PREFIX)).forEach(k => sessionStorage.removeItem(k));
+      Object.keys(localStorage).filter(k => k.startsWith(REMEMBER_PREFIX)).forEach(k => localStorage.removeItem(k));
+    }
   }
 
   return { unlock, logout };

@@ -52,104 +52,81 @@
       <span class="sec-hint" id="cHint"></span>
     </div>
 
-    <!-- §01 KPIs -->
-    <section class="section">
-      <div class="section-head">
-        <div class="sec-left"><h2>Indicadores de Vendas</h2></div>
-        <span class="sec-hint" id="cKpiHint"></span>
-      </div>
-      <div class="kpi-grid" id="cKpiGrid"></div>
-    </section>
+    <!-- ABAS SDR / CLOSER -->
+    <div class="tabs-funnel">
+      <button class="tab-funnel active" data-aba="sdr">SDR</button>
+      <button class="tab-funnel" data-aba="closer">Closer</button>
+    </div>
 
-    <!-- §02 Evolução mensal -->
-    <section class="section">
-      <div class="section-head">
-        <div class="sec-left"><h2 id="cSerieTitle">Evolução mensal</h2></div>
-        <span class="sec-hint">Criados · Ganhos · Faturamento</span>
-      </div>
-      <div class="chart-box"><canvas id="cChartSerie"></canvas></div>
-    </section>
+    <!-- ================= PANE SDR ================= -->
+    <div id="paneSdr" class="pane">
+      <section class="section">
+        <div class="section-head"><div class="sec-left"><h2>Indicadores · SDR</h2></div><span class="sec-hint" id="cKpiSdrHint"></span></div>
+        <div class="kpi-grid" id="cKpiSdr"></div>
+      </section>
+      <section class="section">
+        <div class="section-head"><div class="sec-left"><h2>Funil de qualificação</h2></div><span class="sec-hint">MQLs → Reuniões Qualificadas → No-show</span></div>
+        <div class="com-funil" id="cFunilSdr"></div>
+      </section>
+      <section class="section">
+        <div class="section-head"><div class="sec-left"><h2>Evolução mensal · SDR</h2></div><span class="sec-hint">MQLs · Reuniões Qualificadas</span></div>
+        <div class="chart-box"><canvas id="cSerieSdr"></canvas></div>
+      </section>
+      <section class="section">
+        <div class="section-head"><div class="sec-left"><h2>Ranking de SDRs</h2></div><span class="sec-hint">Qualificações · Reuniões · No-show (automação à parte)</span></div>
+        <div class="rank-table-wrap" id="cSdrs"></div>
+      </section>
+      <section class="section">
+        <div class="section-head"><div class="sec-left"><h2>Reuniões Qualificadas · SDR × Dia</h2></div><select id="cSelSdr" class="sel-inline" aria-label="SDR"></select></div>
+        <div class="hm-scroll"><div id="cReunDiaInner"></div></div>
+      </section>
+      <section class="section">
+        <div class="section-head"><div class="sec-left"><h2>Eficiência · SDRs</h2></div><span class="sec-hint">Quem CONVERTE bem (não só volume)</span></div>
+        <div class="rank-table-wrap" id="cEfSdr"></div>
+      </section>
+    </div>
 
-    <!-- §03 Funil comercial -->
-    <section class="section">
-      <div class="section-head">
-        <div class="sec-left"><h2>Funil comercial</h2></div>
-        <span class="sec-hint">Criado → Qualificado → Reunião → Proposta → Ganho</span>
-      </div>
-      <div class="com-funil" id="cFunil"></div>
-    </section>
-
-    <!-- §04 Ranking de Closers -->
-    <section class="section">
-      <div class="section-head">
-        <div class="sec-left"><h2>Ranking de Closers</h2></div>
-        <span class="sec-hint" id="cClosersHint"></span>
-      </div>
-      <div class="rank-table-wrap" id="cClosers"></div>
-    </section>
-
-    <!-- §05 Ranking de SDRs -->
-    <section class="section">
-      <div class="section-head">
-        <div class="sec-left"><h2>Ranking de SDRs</h2></div>
-        <span class="sec-hint">Qualificações · Reuniões · No-show (automação à parte)</span>
-      </div>
-      <div class="rank-table-wrap" id="cSdrs"></div>
-    </section>
-
-    <!-- §06 Reuniões Qualificadas por dia × SDR (matriz) -->
-    <section class="section">
-      <div class="section-head">
-        <div class="sec-left"><h2>Reuniões Qualificadas · SDR × Dia</h2></div>
-        <select id="cSelSdr" class="sel-inline" aria-label="SDR"></select>
-      </div>
-      <div class="hm-scroll"><div id="cReunDiaInner"></div></div>
-    </section>
-
-    <!-- §07 Vendas por dia × Closer (matriz) -->
-    <section class="section">
-      <div class="section-head">
-        <div class="sec-left"><h2>Vendas · Closer × Dia <small style="font-weight:400;color:var(--text-soft)">(passe o mouse p/ faturamento)</small></h2></div>
-        <select id="cSelCloser" class="sel-inline" aria-label="Closer"></select>
-      </div>
-      <div class="hm-scroll"><div id="cVendaDiaInner"></div></div>
-    </section>
-
-    <!-- §08 Reuniões e Vendas por Curso (closer × curso) -->
-    <section class="section">
-      <div class="section-head">
-        <div class="sec-left"><h2>Reuniões e Vendas por Curso</h2></div>
-        <select id="cSelCurso" class="sel-inline" aria-label="Curso"></select>
-      </div>
-      <div class="rank-table-wrap" id="cCloserCurso"></div>
-    </section>
-
-    <!-- §09 Performance por Curso -->
-    <section class="section">
-      <div class="section-head">
-        <div class="sec-left"><h2>Performance por Curso</h2></div>
-        <span class="sec-hint">Vendas · Ticket · Win rate · Conversão</span>
-      </div>
-      <div class="rank-table-wrap" id="cCursoPerf"></div>
-    </section>
-
-    <!-- §10 Eficiência — SDRs -->
-    <section class="section">
-      <div class="section-head">
-        <div class="sec-left"><h2>Eficiência · SDRs</h2></div>
-        <span class="sec-hint">Quem CONVERTE bem (não só volume)</span>
-      </div>
-      <div class="rank-table-wrap" id="cEfSdr"></div>
-    </section>
-
-    <!-- §11 Eficiência — Closers -->
-    <section class="section">
-      <div class="section-head">
-        <div class="sec-left"><h2>Eficiência · Closers</h2></div>
-        <span class="sec-hint">Conversão RQ→Venda · Win rate · Ticket</span>
-      </div>
-      <div class="rank-table-wrap" id="cEfCloser"></div>
-    </section>
+    <!-- ================= PANE CLOSER ================= -->
+    <div id="paneCloser" class="pane hidden">
+      <section class="section">
+        <div class="section-head"><div class="sec-left"><h2>Indicadores · Closer</h2></div><span class="sec-hint" id="cKpiCloserHint"></span></div>
+        <div class="kpi-grid" id="cKpiCloser"></div>
+      </section>
+      <section class="section">
+        <div class="section-head"><div class="sec-left"><h2>Funil de fechamento</h2></div><span class="sec-hint">Reuniões Qualificadas → Vendas → Faturamento</span></div>
+        <div class="com-funil" id="cFunilCloser"></div>
+      </section>
+      <section class="section">
+        <div class="section-head"><div class="sec-left"><h2>Evolução mensal · Closer</h2></div><span class="sec-hint">Vendas · Faturamento</span></div>
+        <div class="chart-box"><canvas id="cSerieCloser"></canvas></div>
+      </section>
+      <section class="section">
+        <div class="section-head"><div class="sec-left"><h2>Ranking de Closers</h2></div><span class="sec-hint" id="cClosersHint"></span></div>
+        <div class="rank-table-wrap" id="cClosers"></div>
+      </section>
+      <section class="section">
+        <div class="section-head">
+          <div class="sec-left"><h2>Vendas · Closer × Dia <small style="font-weight:400;color:var(--text-soft)">(hover = faturamento)</small></h2></div>
+          <div style="display:inline-flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+            <select id="cSelCursoVenda" class="sel-inline" aria-label="Curso"></select>
+            <select id="cSelCloser" class="sel-inline" aria-label="Closer"></select>
+          </div>
+        </div>
+        <div class="hm-scroll"><div id="cVendaDiaInner"></div></div>
+      </section>
+      <section class="section">
+        <div class="section-head"><div class="sec-left"><h2>Reuniões e Vendas por Curso</h2></div><select id="cSelCurso" class="sel-inline" aria-label="Curso"></select></div>
+        <div class="rank-table-wrap" id="cCloserCurso"></div>
+      </section>
+      <section class="section">
+        <div class="section-head"><div class="sec-left"><h2>Performance por Curso</h2></div><span class="sec-hint">Vendas · Ticket · Win rate · Conversão</span></div>
+        <div class="rank-table-wrap" id="cCursoPerf"></div>
+      </section>
+      <section class="section">
+        <div class="section-head"><div class="sec-left"><h2>Eficiência · Closers</h2></div><span class="sec-hint">Conversão RQ→Venda · Win rate · Ticket</span></div>
+        <div class="rank-table-wrap" id="cEfCloser"></div>
+      </section>
+    </div>
 
   </main>
 </div>

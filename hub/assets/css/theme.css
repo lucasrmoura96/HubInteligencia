@@ -1331,6 +1331,14 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
   text-decoration: none; transition: color var(--t-base);
 }
 .hub-login-back:hover { color: var(--text); }
+.hub-login-remember-wrap {
+  display: flex; align-items: center; gap: 8px;
+  margin: 4px 0 14px; cursor: pointer;
+  font-size: 0.82rem; color: var(--text-muted);
+  user-select: none;
+}
+.hub-login-remember-wrap input { width: 15px; height: 15px; accent-color: var(--brand-500); cursor: pointer; }
+.hub-login-remember-wrap:hover { color: var(--text); }
 
 /* ============================================================
    BOTÃO + MODAL "Coletar insight IA"

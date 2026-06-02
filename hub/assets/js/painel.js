@@ -3179,5 +3179,19 @@ function setupCanalDrawer() {
   setupBusca();
   setupExport();
   setupCanalDrawer();
+
+  // Abre já filtrado no MÊS ATUAL (mês do dado mais recente) — só na abertura
+  (function abrirNoMesAtual() {
+    try {
+      const ref = parseDataRef(STATE.data.meta.data_referencia);
+      STATE.filtro = { ano: String(ref.getFullYear()), mes: [String(ref.getMonth() + 1)], dia: 'all', range: null };
+      const selAno = document.getElementById('filtroAno'); if (selAno) selAno.value = STATE.filtro.ano;
+      MS_INSTANCES.mes && MS_INSTANCES.mes.setValores(mesesSelecionados() || []);
+      MS_INSTANCES.dia && MS_INSTANCES.dia.setValores([]);
+      clearPresets();
+      const mb = document.querySelector('.preset[data-preset="month"]'); if (mb) mb.classList.add('active');
+    } catch (e) { /* fallback: mantém 'Tudo' */ }
+  })();
+
   renderAll();
 })();

@@ -178,7 +178,6 @@ def main():
         return out
 
     closers_raw = ranking_mensal(neg, "Negócio - Proprietário")
-    sdrs_raw = ranking_mensal(neg, "Negócio - Proprietário SDR")
 
     def empacota(raw, marca_bot=False):
         lst = []
@@ -192,7 +191,31 @@ def main():
         return lst
 
     closers = empacota(closers_raw)
-    sdrs = empacota(sdrs_raw, marca_bot=True)
+
+    # ---------- SDRs por ATIVIDADE (não por negócio) ----------
+    # Propostas WhatsApp · Reuniões total · Reuniões com Qualificação OK · No-show
+    # Bucketado pela DATA da atividade (quando o SDR fez o trabalho).
+    av = ativ.copy()
+    av["_dt"] = pd.to_datetime(av["Atividade - Data adicionada"], errors="coerce")
+    av = av[av["_dt"].dt.year >= ANO_INI]
+    av["AnoMes"] = av["_dt"].dt.to_period("M").astype(str)
+    av["sdr"] = av["Negócio - Proprietário SDR"].fillna("(sem SDR)").astype(str)
+    av["_ok"] = av["Negócio - Qualificação/Feedback:"] == "Qualificação OK"
+    av["is_reu"] = av["_tipo"].str.contains("Reuni", case=False, na=False) & (av["_concl"] == "Concluído")
+    av["is_prop"] = av["_tipo"].str.contains("Proposta", case=False, na=False)
+    av["is_ns"] = av["_tipo"].str.contains("No Show", case=False, na=False)
+    av["is_reu_ok"] = av["is_reu"] & av["_ok"]
+    sdr_raw_at = {}
+    for (sdr, m), sub in av.groupby(["sdr", "AnoMes"]):
+        a, me = m.split("-")
+        sdr_raw_at.setdefault(sdr, {})[m] = {
+            "ano": int(a), "mes": int(me),
+            "propostas": int(sub["is_prop"].sum()),
+            "reunioes_total": int(sub["is_reu"].sum()),
+            "reunioes_ok": int(sub["is_reu_ok"].sum()),
+            "no_show": int(sub["is_ns"].sum()),
+        }
+    sdrs = empacota(sdr_raw_at, marca_bot=True)
 
     # ---------- Motivos de perda (mensal) ----------
     perd = neg[neg["is_perdido"]].copy()
@@ -243,6 +266,18 @@ def main():
             "faturamento": round(float(sub.loc[sub["is_ganho"], "valor"].sum()), 2),
         })
 
+    # ---------- DIÁRIO: Vendas por Closer × Curso (data do Ganho) ----------
+    gan2 = neg[neg["is_ganho"]].copy()
+    gan2 = gan2[gan2["_ganho"].dt.year >= ANO_INI]
+    gan2["data"] = gan2["_ganho"].dt.strftime("%Y-%m-%d")
+    venda_closer_curso_diario = []
+    for (c, cu, d), sub in gan2.groupby(["_closer", "_curso", "data"]):
+        venda_closer_curso_diario.append({
+            "closer": c, "curso": cu, "data": d,
+            "qtd": len(sub),
+            "faturamento": round(float(sub["valor"].sum()), 2),
+        })
+
     # ---------- Performance por Curso (mensal) ----------
     curso_mensal = []
     for (cu, a, me), sub in neg.groupby(["_curso", "ano", "mes"]):
@@ -287,6 +322,7 @@ def main():
         "sdrs": sdrs,
         "sdr_reunioes_diario": sdr_reunioes_diario,
         "closer_vendas_diario": closer_vendas_diario,
+        "venda_closer_curso_diario": venda_closer_curso_diario,
         "closer_curso_mensal": closer_curso_mensal,
         "curso_mensal": curso_mensal,
         "motivos_perda_mensal": motivos_mensal,

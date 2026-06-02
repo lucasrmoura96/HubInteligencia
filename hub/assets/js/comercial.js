@@ -12,8 +12,9 @@ const escC = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&
 
 // filtro.mes/dia: 'all' OU Array<string>. filtro.range: {de,ate,deNum,ateNum} ou null
 const CS = { data: null, filtro: { ano: 'all', mes: 'all', dia: 'all', range: null }, closerSel: null,
-             selSdr: 'todos', selCloser: 'todos', selCurso: 'todos' };
-let cChart = null, cReunChart = null, cVendaChart = null;
+             selSdr: 'todos', selCloser: 'todos', selCurso: 'todos', selCursoVenda: 'todos',
+             aba: 'sdr' };
+let cChartSdr = null, cChartCloser = null, cReunChart = null, cVendaChart = null;
 const MS_C = {};  // instâncias dos multi-selects
 
 // ---------- helpers de filtro (mesma lógica do painel MKT) ----------
@@ -125,6 +126,27 @@ function serieAtiva() {
   return CS.data.mensal;
 }
 
+// ---- SDR é medido por ATIVIDADE: propostas WA · reuniões total · reuniões quali OK · no-show ----
+// Série mensal agregada de TODOS os SDRs + MQLs (do RD, contexto de topo)
+function getSdrMensal() {
+  const acc = {};
+  const get = (a, me) => (acc[a + '-' + me] || (acc[a + '-' + me] = { ano:a, mes:me, mqls:0, propostas:0, reunioes_total:0, reunioes_ok:0, no_show:0 }));
+  (CS.data.sdrs || []).forEach(s => (s.mensal || []).forEach(m => {
+    const A = get(m.ano, m.mes);
+    A.propostas += m.propostas||0; A.reunioes_total += m.reunioes_total||0; A.reunioes_ok += m.reunioes_ok||0; A.no_show += m.no_show||0;
+  }));
+  (CS.data.mensal || []).forEach(m => { get(m.ano, m.mes).mqls += m.mqls||0; });
+  return Object.values(acc).sort((a, b) => (a.ano - b.ano) || (a.mes - b.mes));
+}
+function somaSdr(serie) {
+  const acc = { mqls:0, propostas:0, reunioes_total:0, reunioes_ok:0, no_show:0 };
+  (serie || []).forEach(m => { if (!cTupleAtivo(m.ano, m.mes)) return; for (const k in acc) acc[k] += (m[k] || 0); });
+  acc.no_show_rate = (acc.reunioes_total + acc.no_show) ? acc.no_show / (acc.reunioes_total + acc.no_show) * 100 : 0;
+  acc.aproveitamento = acc.reunioes_total ? acc.reunioes_ok / acc.reunioes_total * 100 : 0;
+  acc.conv_mql_rq = acc.mqls ? acc.reunioes_ok / acc.mqls * 100 : 0;
+  return acc;
+}
+
 // ---------- MoM: período anterior comparável (só quando 1 mês + 1 ano, sem dia/range) ----------
 function kpisPeriodoAnterior() {
   const f = CS.filtro;
@@ -165,134 +187,117 @@ function labelPeriodoC() {
   return base;
 }
 
-// ---------- KPIs ----------
-function renderKpisC() {
-  const k = derivar(somaMeses(serieAtiva()));
-  const ant = kpisPeriodoAnterior();
-  const temCloser = !!CS.closerSel;
-  const cicloMed = CS.data.kpis ? CS.data.kpis.ciclo_mediana_dias : null;
-  document.getElementById('cKpiHint').textContent = labelPeriodoC();
-
-  const B = (cur, prevKey, inv=false) => ant ? badge(cur, ant[prevKey], inv) : '';
-
-  // 4 heroes = o funil: MQLs · Reuniões Qual. · Vendas · Faturamento
-  const heroes = `
-    <div class="kpi-heroes">
-      <div class="kpi-cell hero fundo">
-        <span class="kpi-label">◆ MQLs</span>
-        <span class="kpi-value">${temCloser ? '—' : cN(k.mqls)}</span>
-        ${temCloser ? '' : B(k.mqls,'mqls')}
-        <span class="kpi-sub">${temCloser ? 'não atribuível a closer' : 'leads qualificados (RD)'}</span>
-      </div>
-      <div class="kpi-cell hero fundo">
-        <span class="kpi-label">Reuniões Qualificadas</span>
-        <span class="kpi-value">${cN(k.reunioes_qualificadas)}</span>
-        ${B(k.reunioes_qualificadas,'reunioes_qualificadas')}
-        <span class="kpi-sub"><span class="hero-rate">No-show <b>${cPct(k.no_show_rate)}</b></span>${temCloser?'':` · <span class="hero-rate">MQL→RQ <b>${cPct(k.conv_mql_rq)}</b></span>`}</span>
-      </div>
-      <div class="kpi-cell hero fundo">
-        <span class="kpi-label">Vendas</span>
-        <span class="kpi-value">${cN(k.ganhos)}</span>
-        ${B(k.ganhos,'ganhos')}
-        <span class="kpi-sub"><span class="hero-rate">RQ→Venda <b>${cPct(k.conv_rq_venda)}</b></span></span>
-      </div>
-      <div class="kpi-cell hero fundo">
-        <span class="kpi-label">Faturamento</span>
-        <span class="kpi-value">${cR$(k.faturamento)}</span>
-        ${B(k.faturamento,'faturamento')}
-        <span class="kpi-sub">${cN(k.ganhos)} vendas · ticket ${cR$(k.ticket)}</span>
-      </div>
-    </div>`;
-
-  const sec = (lbl, val, sub, prevKey, inv=false, alerta=false) => `
-    <div class="kpi-cell ${alerta?'alert':''}">
-      <span class="kpi-label">${lbl}</span>
-      <span class="kpi-value t-num">${val}</span>
-      ${prevKey && ant ? badge(parseFloatKpi(val), ant[prevKey], inv) : ''}
-      <span class="kpi-sub">${sub}</span>
-    </div>`;
-  function parseFloatKpi(){ return null; } // badges secundárias desativadas (evita ruído)
-
-  const secundarios = `
-    <div class="kpi-grid-sec">
-      ${sec('Win rate', cPct(k.win_rate), 'ganhos ÷ (ganhos+perdidos)')}
-      ${sec('Negócios criados', cN(k.criados), 'entraram no pipeline')}
-      ${sec('Taxa de qualificação', cPct(k.taxa_qualificacao), 'qualificados ÷ criados')}
-      ${sec('No-show rate', cPct(k.no_show_rate), 'faltas em reuniões', null, false, k.no_show_rate>=30)}
-      ${sec('Perdidos', cN(k.perdidos), `${cN(k.abertos)} ainda abertos`)}
-      ${sec('Ciclo (mediana)', cicloMed==null?'—':`${cicloMed} dia(s)`, 'criação → ganho · geral')}
-    </div>`;
-
-  document.getElementById('cKpiGrid').innerHTML = heroes + secundarios;
+// ---------- KPIs por aba ----------
+function kpiHero(label, val, sub, badgeHtml) {
+  return `<div class="kpi-cell hero fundo"><span class="kpi-label">${label}</span><span class="kpi-value">${val}</span>${badgeHtml||''}<span class="kpi-sub">${sub}</span></div>`;
+}
+function kpiSec(label, val, sub, alerta) {
+  return `<div class="kpi-cell ${alerta?'alert':''}"><span class="kpi-label">${label}</span><span class="kpi-value t-num">${val}</span><span class="kpi-sub">${sub}</span></div>`;
 }
 
-// ---------- Evolução mensal ----------
-function renderSerieC() {
-  let meses = (serieAtiva() || []).slice();
+function renderKpisSdr() {
+  const k = somaSdr(getSdrMensal());   // SDR = atividades (propostas, reuniões, no-show)
+  const hint = document.getElementById('cKpiSdrHint'); if (hint) hint.textContent = labelPeriodoC();
+  const heroes = `<div class="kpi-heroes">
+    ${kpiHero('◆ MQLs', cN(k.mqls), 'leads qualificados (RD)', '')}
+    ${kpiHero('Reuniões realizadas', cN(k.reunioes_total), `<span class="hero-rate">aproveitamento <b>${cPct(k.aproveitamento)}</b></span>`, '')}
+    ${kpiHero('Reuniões Qualif. OK', cN(k.reunioes_ok), `<span class="hero-rate">de ${cN(k.reunioes_total)} reuniões</span>`, '')}
+    ${kpiHero('No-show', cN(k.no_show), `${cPct(k.no_show_rate)} das agendadas`, '')}
+  </div>`;
+  const sec = `<div class="kpi-grid-sec">
+    ${kpiSec('Propostas WhatsApp', cN(k.propostas), 'enviadas')}
+    ${kpiSec('Conversão MQL→RQ', cPct(k.conv_mql_rq), 'MQL → reunião quali. OK')}
+    ${kpiSec('Aproveitamento', cPct(k.aproveitamento), 'reuniões OK ÷ total')}
+    ${kpiSec('No-show', cPct(k.no_show_rate), 'das reuniões agendadas', k.no_show_rate>=30)}
+  </div>`;
+  document.getElementById('cKpiSdr').innerHTML = heroes + sec;
+}
+
+function renderKpisCloser() {
+  const k = derivar(somaMeses(serieAtiva()));
+  const ant = kpisPeriodoAnterior();
+  const cicloMed = CS.data.kpis ? CS.data.kpis.ciclo_mediana_dias : null;
+  const B = (cur, key) => ant ? badge(cur, ant[key]) : '';
+  const hint = document.getElementById('cKpiCloserHint'); if (hint) hint.textContent = labelPeriodoC();
+  const heroes = `<div class="kpi-heroes">
+    ${kpiHero('Vendas', cN(k.ganhos), `${cN(k.perdidos)} perdidos`, B(k.ganhos,'ganhos'))}
+    ${kpiHero('Faturamento', cR$(k.faturamento), `ticket ${cR$(k.ticket)}`, B(k.faturamento,'faturamento'))}
+    ${kpiHero('Win rate', cPct(k.win_rate), 'ganhos ÷ (ganhos+perdidos)', '')}
+    ${kpiHero('Conversão RQ→Venda', cPct(k.conv_rq_venda), 'da reunião qual. à venda', '')}
+  </div>`;
+  const sec = `<div class="kpi-grid-sec">
+    ${kpiSec('Reuniões Qualificadas', cN(k.reunioes_qualificadas), 'base do fechamento')}
+    ${kpiSec('Ticket médio', cR$(k.ticket), 'por venda')}
+    ${kpiSec('Negócios criados', cN(k.criados), 'no pipeline')}
+    ${kpiSec('Ciclo (mediana)', cicloMed==null?'—':`${cicloMed} dia(s)`, 'criação → ganho · geral')}
+  </div>`;
+  document.getElementById('cKpiCloser').innerHTML = heroes + sec;
+}
+
+// ---------- Evolução mensal (genérica) ----------
+function mesesParaSerie(serie) {
+  let meses = (serie || []).slice();
   if (CS.filtro.ano !== 'all') meses = meses.filter(m => cAnoAtivo(m.ano));
   else meses = meses.slice(-14);
-  const ctx = document.getElementById('cChartSerie').getContext('2d');
-  if (cChart) cChart.destroy();
-  const brand = cssVarC('--chart-1')||'#1fb541', accent = cssVarC('--chart-2')||'#3b82f6', sand = cssVarC('--chart-3')||'#d99a2b';
+  return meses;
+}
+function buildSerie(canvasId, prevChart, meses, datasets, comLinha) {
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  if (prevChart) prevChart.destroy();
   const txt = cssVarC('--text-muted'), grid = cssVarC('--chart-grid');
-  // Plugin: desenha o valor acima de cada coluna (datasets de barra)
   const labelsCol = {
     id: 'labelsCol',
     afterDatasetsDraw(chart) {
-      const c = chart.ctx;
-      c.save(); c.font = '700 11px "JetBrains Mono", monospace'; c.textAlign = 'center'; c.textBaseline = 'bottom';
+      const c = chart.ctx; c.save();
+      c.font = '700 11px "JetBrains Mono", monospace'; c.textAlign = 'center'; c.textBaseline = 'bottom';
       chart.data.datasets.forEach((ds, di) => {
         if (ds.type === 'line') return;
-        const meta = chart.getDatasetMeta(di);
-        if (meta.hidden) return;
-        meta.data.forEach((bar, idx) => {
-          const v = ds.data[idx];
-          if (!v) return;
-          c.fillStyle = di === 0 ? accent : brand;
-          c.fillText(cN(v), bar.x, bar.y - 4);
+        chart.getDatasetMeta(di).data.forEach((bar, idx) => {
+          const v = ds.data[idx]; if (!v) return;
+          c.fillStyle = ds._lblColor || txt; c.fillText(cN(v), bar.x, bar.y - 4);
         });
       });
       c.restore();
     },
   };
-  cChart = new Chart(ctx, {
-    type: 'bar',
-    plugins: [labelsCol],
-    data: {
-      labels: meses.map(m => `${CMES[m.mes-1]}/${String(m.ano).slice(-2)}`),
-      datasets: [
-        { label: 'Reuniões Qual.', data: meses.map(m => m.reunioes_qualificadas||0), backgroundColor: accent+'aa', borderRadius: 4, yAxisID: 'y' },
-        { label: 'Vendas', data: meses.map(m => m.ganhos||0), backgroundColor: brand, borderRadius: 4, yAxisID: 'y' },
-        { label: 'Faturamento', data: meses.map(m => m.faturamento||0), type: 'line', borderColor: sand, borderWidth: 2.5, tension: 0.3, fill: false, yAxisID: 'y1', pointRadius: 2, order: 0 },
-      ],
-    },
+  const scales = {
+    x: { grid: { display:false }, ticks: { color:txt, font:{ family:'JetBrains Mono, monospace', size:12 } } },
+    y: { position:'left', beginAtZero:true, grid:{ color:grid }, ticks:{ color:txt, font:{ family:'JetBrains Mono, monospace', size:12 } } },
+  };
+  if (comLinha) scales.y1 = { position:'right', beginAtZero:true, grid:{ display:false }, ticks:{ color:txt, font:{ family:'JetBrains Mono, monospace', size:11 }, callback:v=>'R$ '+(v/1000)+'k' } };
+  return new Chart(ctx, {
+    type: 'bar', plugins: [labelsCol],
+    data: { labels: meses.map(m => `${CMES[m.mes-1]}/${String(m.ano).slice(-2)}`), datasets },
     options: {
-      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      responsive: true, maintainAspectRatio: false, interaction: { mode:'index', intersect:false },
       layout: { padding: { top: 18 } },
       plugins: {
-        legend: { position: 'bottom', labels: { color: txt, font: { family:'JetBrains Mono, monospace', size:12 }, usePointStyle:true, pointStyle:'rectRounded', padding:14 } },
+        legend: { position:'bottom', labels: { color:txt, font:{ family:'JetBrains Mono, monospace', size:12 }, usePointStyle:true, pointStyle:'rectRounded', padding:14 } },
         tooltip: { callbacks: { label: (c) => c.dataset.yAxisID==='y1' ? '  Faturamento '+cR$(c.parsed.y) : '  '+c.dataset.label+' '+cN(c.parsed.y) } },
       },
-      scales: {
-        x: { grid: { display:false }, ticks: { color:txt, font:{ family:'JetBrains Mono, monospace', size:12 } } },
-        y: { position:'left', beginAtZero:true, grid:{ color:grid }, ticks:{ color:txt, font:{ family:'JetBrains Mono, monospace', size:12 } } },
-        y1: { position:'right', beginAtZero:true, grid:{ display:false }, ticks:{ color:txt, font:{ family:'JetBrains Mono, monospace', size:11 }, callback:v=>'R$ '+(v/1000)+'k' } },
-      },
+      scales,
     },
   });
 }
+function renderSerieSdr() {
+  const accent = cssVarC('--chart-2')||'#3b82f6', brand = cssVarC('--chart-1')||'#1fb541';
+  const meses = mesesParaSerie(getSdrMensal());
+  cChartSdr = buildSerie('cSerieSdr', cChartSdr, meses, [
+    { label:'Reuniões total', data: meses.map(m => m.reunioes_total||0), backgroundColor: accent+'aa', borderRadius:4, yAxisID:'y', _lblColor: accent },
+    { label:'Reuniões Quali OK', data: meses.map(m => m.reunioes_ok||0), backgroundColor: brand, borderRadius:4, yAxisID:'y', _lblColor: brand },
+  ], false);
+}
+function renderSerieCloser() {
+  const brand = cssVarC('--chart-1')||'#1fb541', sand = cssVarC('--chart-3')||'#d99a2b';
+  const meses = mesesParaSerie(serieAtiva());
+  cChartCloser = buildSerie('cSerieCloser', cChartCloser, meses, [
+    { label:'Vendas', data: meses.map(m => m.ganhos||0), backgroundColor: brand, borderRadius:4, yAxisID:'y', _lblColor: brand },
+    { label:'Faturamento', data: meses.map(m => m.faturamento||0), type:'line', borderColor: sand, borderWidth:2.5, tension:0.3, fill:false, yAxisID:'y1', pointRadius:2, order:0 },
+  ], true);
+}
 
-// ---------- Funil centralizado: MQLs → Reuniões Qual. → No-show → Vendas ----------
-function renderFunilC() {
-  const k = derivar(somaMeses(serieAtiva()));
-  const temCloser = !!CS.closerSel;
-  const etapas = [
-    { etapa: 'MQLs',                 valor: temCloser ? null : k.mqls,           cor: '#3b82f6' },
-    { etapa: 'Reuniões Qualificadas', valor: k.reunioes_qualificadas,             cor: '#1fb541' },
-    { etapa: 'No-show',              valor: k.no_show,                            cor: '#e0a82e' },
-    { etapa: 'Vendas',               valor: k.ganhos, faturamento: k.faturamento, cor: '#0f7c2e' },
-  ];
-  // largura proporcional ao maior valor de contagem (forma de funil)
+// ---------- Funil centralizado (genérico) ----------
+function renderFunilGenerico(innerId, etapas) {
   const base = Math.max(...etapas.map(e => e.valor || 0), 1);
   let html = '';
   etapas.forEach((e, i) => {
@@ -300,19 +305,29 @@ function renderFunilC() {
     const larg = isNull ? 30 : Math.max(22, (e.valor / base) * 100);
     const valTxt = isNull ? '—' : cN(e.valor);
     const fat = e.faturamento != null ? `<span class="fv-fat">${cR$(e.faturamento)}</span>` : '';
-    html += `
-      <div class="fv-stage" style="width:${larg}%; background:linear-gradient(135deg, ${e.cor}, ${e.cor}cc)">
-        <span class="fv-nome">${e.etapa}</span>
-        <span class="fv-val">${valTxt}${fat}</span>
-      </div>`;
-    // conector com % do estágio anterior
+    html += `<div class="fv-stage" style="width:${larg}%; background:linear-gradient(135deg, ${e.cor}, ${e.cor}cc)"><span class="fv-nome">${e.etapa}</span><span class="fv-val">${valTxt}${fat}</span></div>`;
     if (i < etapas.length - 1) {
       const prox = etapas[i+1].valor, atual = e.valor;
       const conv = (prox != null && atual) ? (prox / atual * 100) : null;
       html += `<div class="fv-conn">${conv == null ? '▾' : '▾ ' + cPct(conv) + ' do anterior'}</div>`;
     }
   });
-  document.getElementById('cFunil').innerHTML = html;
+  document.getElementById(innerId).innerHTML = html;
+}
+function renderFunilSdr() {
+  const k = somaSdr(getSdrMensal());
+  renderFunilGenerico('cFunilSdr', [
+    { etapa: 'MQLs', valor: k.mqls, cor: '#3b82f6' },
+    { etapa: 'Reuniões realizadas', valor: k.reunioes_total, cor: '#1fb541' },
+    { etapa: 'Reuniões Qualif. OK', valor: k.reunioes_ok, cor: '#0f7c2e' },
+  ]);
+}
+function renderFunilCloser() {
+  const k = derivar(somaMeses(serieAtiva()));
+  renderFunilGenerico('cFunilCloser', [
+    { etapa: 'Reuniões Qualificadas', valor: k.reunioes_qualificadas, cor: '#1fb541' },
+    { etapa: 'Vendas', valor: k.ganhos, faturamento: k.faturamento, cor: '#0f7c2e' },
+  ]);
 }
 
 // ---------- Pódio + Ranking Closers ----------
@@ -366,15 +381,15 @@ function renderClosersC() {
   });
 }
 
-// ---------- Pódio + Ranking SDRs ----------
+// ---------- Pódio + Ranking SDRs (por ATIVIDADE) ----------
 function renderSdrsC() {
   const linhas = (CS.data.sdrs || []).map(s => {
-    const a = derivar(somaMeses(s.mensal));
-    return { nome:s.nome, is_bot:s.is_bot, sem:s.sem_sdr, quali:a.qualificados, criados:a.criados, reun:a.com_reuniao, nsh:a.no_show, nsh_rate:a.no_show_rate };
-  }).filter(s => s.criados>0 || s.reun>0).sort((a,b) => b.reun - a.reun);
+    const a = somaSdr(s.mensal);
+    return { nome:s.nome, is_bot:s.is_bot, sem:s.sem_sdr, prop:a.propostas, reuT:a.reunioes_total, reuOk:a.reunioes_ok, ns:a.no_show, nsRate:a.no_show_rate };
+  }).filter(s => s.reuT>0 || s.prop>0 || s.ns>0).sort((a,b) => b.reuOk - a.reuOk);
   const tag = (s) => s.is_bot ? '<span class="sdr-tag bot">automação</span>' : (s.sem ? '<span class="sdr-tag sem">sem SDR</span>' : '');
 
-  // Pódio: top 3 SDRs HUMANOS por reuniões (exclui automação e sem SDR)
+  // Pódio: top 3 SDRs HUMANOS por reuniões qualificadas OK
   const humanos = linhas.filter(s => !s.is_bot && !s.sem).slice(0, 3);
   const emoji = ['🥇','🥈','🥉'], medal = ['gold','silver','bronze'];
   const podio = `
@@ -384,20 +399,20 @@ function renderSdrsC() {
           <div class="podio-medal">${emoji[i]}</div>
           <div class="podio-ini">${escC(iniciais(s.nome))}</div>
           <div class="podio-nome">${escC(s.nome)}</div>
-          <div class="podio-fat">${cN(s.reun)} reuniões</div>
-          <div class="podio-sub">${cN(s.quali)} qualif. · no-show ${cPct(s.nsh_rate)}</div>
+          <div class="podio-fat">${cN(s.reuOk)} reuniões OK</div>
+          <div class="podio-sub">${cN(s.reuT)} reuniões · no-show ${cPct(s.nsRate)}</div>
         </div>`).join('')}
     </div>`;
 
   const tabela = `
     <table class="rank-table">
-      <thead><tr><th>#</th><th>SDR</th><th class="num">Negócios</th><th class="num">Qualificados</th><th class="num">Reuniões</th><th class="num">No-show</th><th class="num">No-show %</th></tr></thead>
+      <thead><tr><th>#</th><th>SDR</th><th class="num">Propostas WA</th><th class="num">Reuniões</th><th class="num">Reuniões Quali OK</th><th class="num">No-show</th><th class="num">No-show %</th></tr></thead>
       <tbody>
         ${linhas.map((s,i) => `
           <tr class="${s.is_bot?'is-bot':''}">
             <td class="pos">${i+1}</td><td class="nome">${escC(s.nome)} ${tag(s)}</td>
-            <td class="num">${cN(s.criados)}</td><td class="num">${cN(s.quali)}</td>
-            <td class="num"><b>${cN(s.reun)}</b></td><td class="num">${cN(s.nsh)}</td><td class="num">${cPct(s.nsh_rate)}</td>
+            <td class="num">${cN(s.prop)}</td><td class="num">${cN(s.reuT)}</td>
+            <td class="num"><b>${cN(s.reuOk)}</b></td><td class="num">${cN(s.ns)}</td><td class="num">${cPct(s.nsRate)}</td>
           </tr>`).join('')}
       </tbody>
     </table>`;
@@ -515,10 +530,14 @@ function renderReunDia() {
   renderHeatmap('cReunDiaInner', rows, 'sdr', 'v', '59,130,246');
 }
 
-// ---------- Vendas: Closer × Dia (célula = nº vendas; hover = faturamento) ----------
+// ---------- Vendas: Closer × Dia (filtrável por Curso; célula = nº vendas; hover = faturamento) ----------
 function renderVendaDia() {
-  const rows = (CS.data.closer_vendas_diario || [])
-    .filter(r => dataNoFiltro(r.data) && (CS.selCloser === 'todos' || r.closer === CS.selCloser))
+  // usa o dado diário por closer+curso; soma cursos quando "todos"
+  const fonte = CS.data.venda_closer_curso_diario || [];
+  const rows = fonte
+    .filter(r => dataNoFiltro(r.data)
+      && (CS.selCloser === 'todos' || r.closer === CS.selCloser)
+      && (CS.selCursoVenda === 'todos' || r.curso === CS.selCursoVenda))
     .map(r => ({ closer: r.closer, data: r.data, v: r.qtd, fat: r.faturamento }));
   renderHeatmap('cVendaDiaInner', rows, 'closer', 'v', '31,181,65', 'fat');
 }
@@ -605,28 +624,25 @@ function renderCursoPerf() {
     </table>`;
 }
 
-// ---------- Eficiência · SDRs (taxas, não só volume) ----------
+// ---------- Eficiência · SDRs (aproveitamento das reuniões, não só volume) ----------
 function renderEfSdr() {
   const linhas = (CS.data.sdrs || []).map(s => {
-    const a = somaMeses(s.mensal);
-    return { nome:s.nome, is_bot:s.is_bot, sem:s.sem_sdr, criados:a.criados, quali:a.qualificados,
-      rq:a.reunioes_qualificadas, reun:a.com_reuniao, nsh:a.no_show,
-      taxa_quali: a.criados ? a.qualificados/a.criados*100 : 0,
-      nsh_rate: (a.com_reuniao+a.no_show) ? a.no_show/(a.com_reuniao+a.no_show)*100 : 0 };
-  }).filter(s => s.criados >= 10)  // volume mínimo p/ taxa fazer sentido
-    .sort((a,b) => b.taxa_quali - a.taxa_quali);
+    const a = somaSdr(s.mensal);
+    return { nome:s.nome, is_bot:s.is_bot, sem:s.sem_sdr, reuT:a.reunioes_total, reuOk:a.reunioes_ok, ns:a.no_show,
+      aprov: a.aproveitamento, nsRate: a.no_show_rate };
+  }).filter(s => s.reuT >= 5)  // volume mínimo de reuniões p/ a taxa fazer sentido
+    .sort((a,b) => b.aprov - a.aprov);
   const tag = (s) => s.is_bot ? '<span class="sdr-tag bot">automação</span>' : (s.sem ? '<span class="sdr-tag sem">sem SDR</span>' : '');
   document.getElementById('cEfSdr').innerHTML = `
     <table class="rank-table">
-      <thead><tr><th>#</th><th>SDR</th><th class="num">Negócios</th><th class="num">Qualif.</th><th class="num">Taxa qualif.</th><th class="num">RQ</th><th class="num">No-show %</th></tr></thead>
+      <thead><tr><th>#</th><th>SDR</th><th class="num">Reuniões</th><th class="num">Quali OK</th><th class="num">Aproveitamento</th><th class="num">No-show %</th></tr></thead>
       <tbody>
         ${linhas.map((s,i) => `
           <tr class="${s.is_bot?'is-bot':''}">
             <td class="pos">${i+1}</td><td class="nome">${escC(s.nome)} ${tag(s)}</td>
-            <td class="num">${cN(s.criados)}</td><td class="num">${cN(s.quali)}</td>
-            <td class="num">${pillC(s.taxa_quali, 70, 50)}</td>
-            <td class="num"><b>${cN(s.rq)}</b></td>
-            <td class="num">${pillC(s.nsh_rate, 15, 30, true)}</td>
+            <td class="num">${cN(s.reuT)}</td><td class="num"><b>${cN(s.reuOk)}</b></td>
+            <td class="num">${pillC(s.aprov, 80, 60)}</td>
+            <td class="num">${pillC(s.nsRate, 15, 30, true)}</td>
           </tr>`).join('')}
       </tbody>
     </table>`;
@@ -658,10 +674,102 @@ function renderEfCloser() {
     </table>`;
 }
 
-function renderAllC() {
-  renderKpisC(); renderSerieC(); renderFunilC(); renderClosersC(); renderSdrsC();
-  renderReunDia(); renderVendaDia(); renderCloserCursoC();
-  renderCursoPerf(); renderEfSdr(); renderEfCloser();
+// ---------- Análise de Perdas (Pareto dos motivos) ----------
+let cPerdasChart = null;
+function renderPerdas() {
+  const acc = {};
+  (CS.data.motivos_perda_mensal || []).filter(r => cTupleAtivo(r.ano, r.mes))
+    .forEach(r => { acc[r.motivo] = (acc[r.motivo] || 0) + r.qtd; });
+  let arr = Object.entries(acc).map(([motivo, qtd]) => ({ motivo, qtd })).sort((a, b) => b.qtd - a.qtd);
+  const total = arr.reduce((s, x) => s + x.qtd, 0);
+  const hint = document.getElementById('cPerdasHint');
+  const box = document.getElementById('cPerdasBox');
+
+  if (!total) {
+    if (cPerdasChart) { cPerdasChart.destroy(); cPerdasChart = null; }
+    hint.textContent = 'Sem perdas no recorte';
+    box.style.height = '120px';
+    box.innerHTML = '<div style="display:flex;height:100%;align-items:center;justify-content:center;color:var(--text-muted)">Sem perdas para esse período.</div>';
+    return;
+  }
+  if (!document.getElementById('cPerdasChart')) box.innerHTML = '<canvas id="cPerdasChart"></canvas>';
+
+  const TOPN = 12;
+  const top = arr.slice(0, TOPN);
+  const resto = arr.slice(TOPN).reduce((s, x) => s + x.qtd, 0);
+  if (resto > 0) top.push({ motivo: 'Outros', qtd: resto });
+  const top3 = arr.slice(0, 3).reduce((s, x) => s + x.qtd, 0);
+  hint.textContent = `${cN(total)} perdas · top 3 motivos = ${cPct(top3 / total * 100)}`;
+
+  box.style.height = Math.max(300, top.length * 34 + 70) + 'px';
+  const ctx = document.getElementById('cPerdasChart').getContext('2d');
+  if (cPerdasChart) cPerdasChart.destroy();
+  const txt = cssVarC('--text-muted'), grid = cssVarC('--chart-grid');
+
+  const labelPlugin = {
+    id: 'perdasLabels',
+    afterDatasetsDraw(ch) {
+      const c = ch.ctx; c.save();
+      c.font = '700 12px "JetBrains Mono", monospace'; c.textBaseline = 'middle';
+      ch.getDatasetMeta(0).data.forEach((bar, i) => {
+        const q = top[i].qtd, p = (q / total * 100).toFixed(1).replace('.', ',');
+        c.fillStyle = txt; c.textAlign = 'left';
+        c.fillText(`${cN(q)} · ${p}%`, bar.x + 8, bar.y);
+      });
+      c.restore();
+    },
+  };
+  cPerdasChart = new Chart(ctx, {
+    type: 'bar',
+    plugins: [labelPlugin],
+    data: {
+      labels: top.map(t => t.motivo),
+      datasets: [{ data: top.map(t => t.qtd), backgroundColor: top.map(t => t.motivo === 'Outros' ? '#9ca3af' : '#ef4444'), borderRadius: 4, barPercentage: 0.82 }],
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      layout: { padding: { right: 70 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (c) => `  ${cN(c.parsed.x)} perdas · ${(c.parsed.x/total*100).toFixed(1)}%` } },
+      },
+      scales: {
+        x: { beginAtZero: true, grid: { color: grid }, ticks: { color: txt, font: { family:'JetBrains Mono, monospace', size:11 } } },
+        y: { grid: { display: false }, ticks: { color: cssVarC('--text'), font: { family:'JetBrains Mono, monospace', size:12, weight:600 } } },
+      },
+    },
+  });
+}
+
+// Renderiza só a aba ativa (SDR ou Closer). Charts precisam do container visível.
+function renderAtiva() {
+  if (CS.aba === 'sdr') {
+    renderKpisSdr(); renderFunilSdr(); renderSerieSdr();
+    renderSdrsC(); renderReunDia(); renderEfSdr();
+  } else {
+    renderKpisCloser(); renderFunilCloser(); renderSerieCloser();
+    renderClosersC(); renderVendaDia(); renderCloserCursoC(); renderCursoPerf(); renderEfCloser();
+  }
+}
+// Alias mantido (todos os handlers de filtro chamam renderAllC)
+function renderAllC() { renderAtiva(); }
+
+function setupTabsC() {
+  document.querySelectorAll('.tabs-funnel .tab-funnel[data-aba]').forEach(b => {
+    b.classList.toggle('active', b.dataset.aba === CS.aba);
+    b.onclick = () => {
+      if (CS.aba === b.dataset.aba) return;
+      CS.aba = b.dataset.aba;
+      CS.closerSel = null;  // cross-filter de closer não faz sentido entre abas
+      document.querySelectorAll('.tabs-funnel .tab-funnel').forEach(x => x.classList.toggle('active', x.dataset.aba === CS.aba));
+      document.getElementById('paneSdr').classList.toggle('hidden', CS.aba !== 'sdr');
+      document.getElementById('paneCloser').classList.toggle('hidden', CS.aba !== 'closer');
+      renderBannerC();
+      renderAtiva();
+    };
+  });
+  document.getElementById('paneSdr').classList.toggle('hidden', CS.aba !== 'sdr');
+  document.getElementById('paneCloser').classList.toggle('hidden', CS.aba !== 'closer');
 }
 
 // ---------- Filtros (padrão MKT: Ano + Mês/Dia multi + presets + range) ----------
@@ -750,6 +858,13 @@ function setupFiltrosC() {
   selCloser.innerHTML = optTodos(distintos(CS.data.closer_vendas_diario, 'closer'), 'Todos os closers');
   selCloser.onchange = () => { CS.selCloser = selCloser.value; renderVendaDia(); };
 
+  const selCursoV = document.getElementById('cSelCursoVenda');
+  if (selCursoV) {
+    const cursosV = (CS.data.filtros_disponiveis && CS.data.filtros_disponiveis.produtos) || distintos(CS.data.venda_closer_curso_diario, 'curso');
+    selCursoV.innerHTML = optTodos(cursosV, 'Todos os cursos');
+    selCursoV.onchange = () => { CS.selCursoVenda = selCursoV.value; renderVendaDia(); };
+  }
+
   const selCurso = document.getElementById('cSelCurso');
   const cursos = (CS.data.filtros_disponiveis && CS.data.filtros_disponiveis.produtos) || distintos(CS.data.closer_curso_mensal, 'curso');
   selCurso.innerHTML = optTodos(cursos, 'Todos os cursos');
@@ -767,5 +882,20 @@ function setupFiltrosC() {
   catch (e) { console.error(e); return; }
   document.getElementById('cHint').textContent = CS.data.meta && CS.data.meta.data_referencia ? ('Dados até ' + CS.data.meta.data_referencia) : '';
   setupFiltrosC();
-  renderAllC();
+  setupTabsC();
+
+  // Abre já filtrado no MÊS ATUAL (mês do dado mais recente) — só na abertura
+  (function abrirNoMesAtual() {
+    try {
+      const ref = CS.data.meta && CS.data.meta.data_referencia ? new Date(CS.data.meta.data_referencia + 'T00:00:00') : new Date();
+      CS.filtro = { ano: String(ref.getFullYear()), mes: [String(ref.getMonth() + 1)], dia: 'all', range: null };
+      const selA = document.getElementById('cAno'); if (selA) selA.value = CS.filtro.ano;
+      MS_C.mes && MS_C.mes.setValores(cMesesSel() || []);
+      MS_C.dia && MS_C.dia.setValores([]);
+      clearPresetsC();
+      const mb = document.querySelector('.filter-bar .preset[data-preset="month"]'); if (mb) mb.classList.add('active');
+    } catch (e) { /* fallback: mantém 'Tudo' */ }
+  })();
+
+  renderAtiva();
 })();
