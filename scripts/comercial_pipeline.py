@@ -172,6 +172,7 @@ def main():
                 "faturamento": round(float(sub.loc[sub["is_ganho"], "valor"].sum()), 2),
                 "qualificados": int(sub["is_quali_ok"].sum()),
                 "com_reuniao": int(sub["tem_reuniao"].sum()),
+                "rq": int(sub["is_rq"].sum()),
                 "no_show": int(sub["tem_noshow"].sum()),
             }
         return out
@@ -242,6 +243,23 @@ def main():
             "faturamento": round(float(sub.loc[sub["is_ganho"], "valor"].sum()), 2),
         })
 
+    # ---------- Performance por Curso (mensal) ----------
+    curso_mensal = []
+    for (cu, a, me), sub in neg.groupby(["_curso", "ano", "mes"]):
+        ganhos = int(sub["is_ganho"].sum())
+        perdidos = int(sub["is_perdido"].sum())
+        fat = float(sub.loc[sub["is_ganho"], "valor"].sum())
+        curso_mensal.append({
+            "curso": cu, "ano": int(a), "mes": int(me),
+            "criados": len(sub),
+            "ganhos": ganhos,
+            "perdidos": perdidos,
+            "faturamento": round(fat, 2),
+            "qualificados": int(sub["is_quali_ok"].sum()),
+            "com_reuniao": int(sub["tem_reuniao"].sum()),
+            "rq": int(sub["is_rq"].sum()),
+        })
+
     # ---------- Filtros disponíveis ----------
     def uniq(serie):
         return sorted([str(x) for x in serie.dropna().unique() if str(x).strip()])
@@ -270,6 +288,7 @@ def main():
         "sdr_reunioes_diario": sdr_reunioes_diario,
         "closer_vendas_diario": closer_vendas_diario,
         "closer_curso_mensal": closer_curso_mensal,
+        "curso_mensal": curso_mensal,
         "motivos_perda_mensal": motivos_mensal,
         "filtros_disponiveis": filtros,
     }

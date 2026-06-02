@@ -566,9 +566,102 @@ function renderBannerC() {
   } else { b.classList.add('hidden'); }
 }
 
+// Pílula colorida de taxa (good/mid/bad). inverted=true => menor é melhor (no-show)
+function pillC(v, good, mid, inverted = false) {
+  let cls;
+  if (inverted) cls = v <= good ? 'good' : (v <= mid ? 'mid' : 'bad');
+  else cls = v >= good ? 'good' : (v >= mid ? 'mid' : 'bad');
+  return `<span class="pct-pill ${cls}">${cPct(v)}</span>`;
+}
+
+// ---------- Performance por Curso ----------
+function renderCursoPerf() {
+  const acc = {};
+  (CS.data.curso_mensal || []).filter(r => cTupleAtivo(r.ano, r.mes)).forEach(r => {
+    const A = acc[r.curso] || (acc[r.curso] = { criados:0, ganhos:0, perdidos:0, fat:0, rq:0 });
+    A.criados += r.criados; A.ganhos += r.ganhos; A.perdidos += r.perdidos; A.fat += r.faturamento; A.rq += r.rq;
+  });
+  const linhas = Object.entries(acc).map(([curso, a]) => ({
+    curso, ...a,
+    win: (a.ganhos + a.perdidos) ? a.ganhos/(a.ganhos+a.perdidos)*100 : 0,
+    ticket: a.ganhos ? a.fat/a.ganhos : 0,
+    convRq: a.rq ? a.ganhos/a.rq*100 : 0,
+  })).filter(c => c.ganhos > 0 || c.criados > 0).sort((a,b) => b.fat - a.fat);
+
+  document.getElementById('cCursoPerf').innerHTML = `
+    <table class="rank-table">
+      <thead><tr><th>#</th><th>Curso</th><th class="num">Criados</th><th class="num">RQ</th><th class="num">Vendas</th><th class="num">Win rate</th><th class="num">Conv. RQ→V</th><th class="num">Ticket</th><th class="num">Faturamento</th></tr></thead>
+      <tbody>
+        ${linhas.length ? linhas.map((c,i) => `
+          <tr class="${i<3?'top3':''}">
+            <td class="pos">${i+1}</td><td class="nome">${escC(c.curso)}</td>
+            <td class="num">${cN(c.criados)}</td><td class="num">${cN(c.rq)}</td>
+            <td class="num"><b>${cN(c.ganhos)}</b></td>
+            <td class="num">${pillC(c.win, 25, 15)}</td>
+            <td class="num">${pillC(c.convRq, 40, 20)}</td>
+            <td class="num">${cR$(c.ticket)}</td><td class="num">${cR$(c.fat)}</td>
+          </tr>`).join('') : '<tr><td colspan="9" style="text-align:center;padding:18px;color:var(--text-muted)">Sem dados.</td></tr>'}
+      </tbody>
+    </table>`;
+}
+
+// ---------- Eficiência · SDRs (taxas, não só volume) ----------
+function renderEfSdr() {
+  const linhas = (CS.data.sdrs || []).map(s => {
+    const a = somaMeses(s.mensal);
+    return { nome:s.nome, is_bot:s.is_bot, sem:s.sem_sdr, criados:a.criados, quali:a.qualificados,
+      rq:a.reunioes_qualificadas, reun:a.com_reuniao, nsh:a.no_show,
+      taxa_quali: a.criados ? a.qualificados/a.criados*100 : 0,
+      nsh_rate: (a.com_reuniao+a.no_show) ? a.no_show/(a.com_reuniao+a.no_show)*100 : 0 };
+  }).filter(s => s.criados >= 10)  // volume mínimo p/ taxa fazer sentido
+    .sort((a,b) => b.taxa_quali - a.taxa_quali);
+  const tag = (s) => s.is_bot ? '<span class="sdr-tag bot">automação</span>' : (s.sem ? '<span class="sdr-tag sem">sem SDR</span>' : '');
+  document.getElementById('cEfSdr').innerHTML = `
+    <table class="rank-table">
+      <thead><tr><th>#</th><th>SDR</th><th class="num">Negócios</th><th class="num">Qualif.</th><th class="num">Taxa qualif.</th><th class="num">RQ</th><th class="num">No-show %</th></tr></thead>
+      <tbody>
+        ${linhas.map((s,i) => `
+          <tr class="${s.is_bot?'is-bot':''}">
+            <td class="pos">${i+1}</td><td class="nome">${escC(s.nome)} ${tag(s)}</td>
+            <td class="num">${cN(s.criados)}</td><td class="num">${cN(s.quali)}</td>
+            <td class="num">${pillC(s.taxa_quali, 70, 50)}</td>
+            <td class="num"><b>${cN(s.rq)}</b></td>
+            <td class="num">${pillC(s.nsh_rate, 15, 30, true)}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+// ---------- Eficiência · Closers (conversão, não só volume) ----------
+function renderEfCloser() {
+  const linhas = (CS.data.closers || []).map(c => {
+    const a = somaMeses(c.mensal);
+    return { nome:c.nome, rq:a.reunioes_qualificadas, ganhos:a.ganhos, perdidos:a.perdidos, fat:a.faturamento,
+      convRq: a.reunioes_qualificadas ? a.ganhos/a.reunioes_qualificadas*100 : 0,
+      win: (a.ganhos+a.perdidos) ? a.ganhos/(a.ganhos+a.perdidos)*100 : 0,
+      ticket: a.ganhos ? a.fat/a.ganhos : 0 };
+  }).filter(c => c.rq >= 3)  // volume mínimo de RQ p/ conversão fazer sentido
+    .sort((a,b) => b.convRq - a.convRq);
+  document.getElementById('cEfCloser').innerHTML = `
+    <table class="rank-table">
+      <thead><tr><th>#</th><th>Closer</th><th class="num">RQ</th><th class="num">Vendas</th><th class="num">Conv. RQ→Venda</th><th class="num">Win rate</th><th class="num">Ticket</th></tr></thead>
+      <tbody>
+        ${linhas.map((c,i) => `
+          <tr class="${i<3?'top3':''}">
+            <td class="pos">${i+1}</td><td class="nome">${escC(c.nome)}</td>
+            <td class="num">${cN(c.rq)}</td><td class="num"><b>${cN(c.ganhos)}</b></td>
+            <td class="num">${pillC(c.convRq, 40, 20)}</td>
+            <td class="num">${pillC(c.win, 25, 15)}</td>
+            <td class="num">${cR$(c.ticket)}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
 function renderAllC() {
   renderKpisC(); renderSerieC(); renderFunilC(); renderClosersC(); renderSdrsC();
   renderReunDia(); renderVendaDia(); renderCloserCursoC();
+  renderCursoPerf(); renderEfSdr(); renderEfCloser();
 }
 
 // ---------- Filtros (padrão MKT: Ano + Mês/Dia multi + presets + range) ----------
