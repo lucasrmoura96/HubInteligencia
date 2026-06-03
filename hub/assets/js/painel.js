@@ -2975,6 +2975,70 @@ function setupExport() {
 // ============================================================
 // RENDER ALL
 // ============================================================
+// ---------- Ticker de destaques do MKT (superlativos por curso/dia, não-redundantes) ----------
+function tkItemHtmlMkt(f) {
+  return `<span class="tk-item ${f.cls || ''}"><span class="tk-lab">${f.icon} ${f.label}</span> <b>${escapeHtml(f.name)}</b> <span class="tk-val">${f.value}</span></span>`;
+}
+function tkRowHtmlMkt(f) {
+  return `<div class="tk-prow ${f.cls || ''}"><span class="tk-lab">${f.icon} ${f.label}</span><b class="tk-prow-nome">${escapeHtml(f.name)}</b><span class="tk-val">${f.value}</span></div>`;
+}
+function calcTickerFactsMkt() {
+  const tab = STATE.data && STATE.data[STATE.tab]; if (!tab) return [];
+  const r0 = (n) => 'R$ ' + Math.round(n).toLocaleString('pt-BR');
+  const dBR = (iso) => String(iso).split('-').reverse().join('/');
+  const ehVazio = (c) => !c || /sem\s*(curso|produto)/i.test(c) || c === '(vazio)';
+  // Cursos agregados no período (respeita período + tipo + cursos multi)
+  const cAcc = {};
+  (tab.por_curso_mensal || []).forEach(r => {
+    if (ehVazio(r.curso)) return;
+    if (!tupleAtivo(r.ano, r.mes) || !cursoMatchTipo(r.curso, STATE.tipoCurso) || !cursoAtivo(r.curso)) return;
+    const A = cAcc[r.curso] || (cAcc[r.curso] = { leads: 0, mqls: 0, custo: 0 });
+    A.leads += r.leads || 0; A.mqls += r.mqls || 0; A.custo += r.custo || 0;
+  });
+  const cursos = Object.entries(cAcc).map(([curso, a]) => ({ curso, ...a, cpmql: a.mqls ? a.custo / a.mqls : 0 }));
+  // Dias (pico de MQLs)
+  const dAcc = {};
+  (tab.diario || []).forEach(d => { if (!dataIsoAtiva(d.data)) return; dAcc[d.data] = (dAcc[d.data] || 0) + (d.mqls || 0); });
+  const dias = Object.entries(dAcc).map(([data, mqls]) => ({ data, mqls }));
+
+  const facts = [];
+  const comMql = cursos.filter(c => c.mqls > 0);
+  if (comMql.length) {
+    const maisMql = comMql.slice().sort((a, b) => b.mqls - a.mqls)[0];
+    facts.push({ icon: '📊', label: 'Curso com mais MQLs', name: maisMql.curso, value: `${fmtN(maisMql.mqls)} MQLs`, cls: 'pos' });
+    const maiorInv = cursos.slice().sort((a, b) => b.custo - a.custo)[0];
+    if (maiorInv && maiorInv.custo > 0) facts.push({ icon: '💰', label: 'Maior investimento', name: maiorInv.curso, value: r0(maiorInv.custo), cls: 'muted' });
+    const elig = comMql.filter(c => c.mqls >= 10 && c.custo > 0);   // volume mínimo p/ custo/MQL ser justo
+    if (elig.length) {
+      const melhor = elig.slice().sort((a, b) => a.cpmql - b.cpmql)[0];
+      const pior = elig.slice().sort((a, b) => b.cpmql - a.cpmql)[0];
+      facts.push({ icon: '💸', label: 'Melhor custo/MQL', name: melhor.curso, value: `${fmtR$2(melhor.cpmql)}/MQL`, cls: 'pos' });
+      if (pior.curso !== melhor.curso) facts.push({ icon: '⚠️', label: 'Pior custo/MQL', name: pior.curso, value: `${fmtR$2(pior.cpmql)}/MQL`, cls: 'muted' });
+    }
+  }
+  if (dias.length) {
+    const pico = dias.slice().sort((a, b) => b.mqls - a.mqls)[0];
+    if (pico.mqls > 0) facts.push({ icon: '📅', label: 'Pico de MQLs (dia)', name: dBR(pico.data), value: `${fmtN(pico.mqls)} MQLs`, cls: 'pos' });
+  }
+  return facts;
+}
+function renderTickerMkt() {
+  const host = document.getElementById('mktTicker'); if (!host) return;
+  const facts = calcTickerFactsMkt();
+  if (!facts.length) { host.style.display = 'none'; host.innerHTML = ''; host.classList.remove('expanded'); return; }
+  host.style.display = '';
+  const seq = facts.map(tkItemHtmlMkt).join('<span class="tk-sep">•</span>');
+  host.innerHTML =
+    `<div class="tk-bar">
+       <span class="tk-tag"><span class="tk-pulse"></span>Destaques
+         <svg class="tk-caret" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+       </span>
+       <div class="tk-viewport"><div class="tk-track">${seq}<span class="tk-sep">•</span>${seq}</div></div>
+       <span class="tk-toggle-hint">clique para fixar / voltar a rolar</span>
+     </div>
+     <div class="tk-panel">${facts.map(tkRowHtmlMkt).join('')}</div>`;
+}
+
 function renderAll() {
   // Guard: se loadData falhou (sem internet, JSON corrompido), evita cascata de erros
   if (!STATE.data) {
@@ -2982,6 +3046,7 @@ function renderAll() {
     return;
   }
   renderChipsMkt();             // chips do filtro ativo (resumo do recorte)
+  renderTickerMkt();            // ticker de destaques (superlativos por curso/dia)
   renderSelectionBanner();
   renderEmptyStateBanner();     // banner topo quando filtro retorna zero
   renderKPIs();
@@ -3305,6 +3370,12 @@ function setupCanalDrawer() {
     const fs = document.querySelector('.filters-sticky'); if (!fs) return;
     const on = () => fs.classList.toggle('is-stuck', fs.getBoundingClientRect().top <= 0.5);
     window.addEventListener('scroll', on, { passive: true }); on();
+  })();
+
+  // Ticker: clicar fixa/abre painel estático; clicar de novo volta a rolar
+  (function tickerToggle() {
+    const tk = document.getElementById('mktTicker'); if (!tk) return;
+    tk.addEventListener('click', (e) => { if (e.target.closest('.tk-panel')) return; tk.classList.toggle('expanded'); });
   })();
 
   renderAll();
