@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Comercial · Agroadvance</title>
+  <title>Performance Comercial · Agroadvance</title>
   <link rel="stylesheet" href="assets/css/theme.css" />
   <script src="assets/vendor/chart.umd.js"></script>
   <!-- Dados CIFRADOS da área comercial (AES-256-GCM) -->
@@ -12,20 +12,59 @@
 </head>
 <body>
 
-<div class="app">
-  <main class="main">
+<div class="app-layout">
 
-    <!-- Topbar -->
-    <div class="topbar">
-      <a class="home-mark brand-logo" href="index.html" aria-label="Agroadvance">
-        <img src="assets/img/LogoAgro.png" alt="Agroadvance" class="brand-logo-img" />
-      </a>
-      <h1>Comercial · Performance</h1>
-      <a class="area-back" href="index.html" aria-label="Voltar">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-      </a>
+  <!-- ============= SIDEBAR ============= -->
+  <aside class="sidebar">
+    <a class="sb-brand" href="index.html" aria-label="Voltar ao HUB" title="Voltar ao HUB">
+      <img src="assets/img/LogoAgro.png" alt="Agroadvance" class="sb-brand-img" />
+    </a>
+
+    <a class="sb-btn" href="index.html" aria-label="Home">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z"/></svg>
+      <span class="sb-tooltip">Home</span>
+    </a>
+
+    <button class="sb-btn active" aria-label="Performance Comercial">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>
+      <span class="sb-tooltip">Performance Comercial</span>
+    </button>
+
+    <div class="sb-spacer"></div>
+
+    <button class="sb-btn" id="themeToggle" aria-label="Alternar tema">
+      <svg id="iconSun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+      <svg id="iconMoon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="hidden"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <span class="sb-tooltip">Tema</span>
+    </button>
+  </aside>
+
+  <!-- ============= MAIN ============= -->
+  <main class="app-main">
+
+    <header class="app-top">
+      <div>
+        <div class="crumb-line">
+          <span>Comercial</span>
+          <span class="crumb-sep">›</span>
+          <span class="crumb-active">Performance</span>
+        </div>
+        <h1>Performance Comercial</h1>
+      </div>
+      <div class="app-edition">
+        <span class="ed-pulse"></span>
+        <span id="cHint">—</span>
+      </div>
+    </header>
+
+    <!-- ABAS SDR / CLOSER -->
+    <div class="tabs-funnel">
+      <button class="tab-funnel active" data-aba="sdr">SDR</button>
+      <button class="tab-funnel" data-aba="closer">Closer</button>
     </div>
 
+    <!-- Camada de filtros (fixa no topo ao rolar) -->
+    <div class="filters-sticky">
     <!-- FILTROS (padrão MKT) -->
     <div class="filter-bar">
       <span class="fb-label">Período</span>
@@ -49,14 +88,23 @@
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         Limpar
       </button>
-      <span class="sec-hint" id="cHint"></span>
     </div>
 
-    <!-- ABAS SDR / CLOSER -->
-    <div class="tabs-funnel">
-      <button class="tab-funnel active" data-aba="sdr">SDR</button>
-      <button class="tab-funnel" data-aba="closer">Closer</button>
+    <!-- Filtro de TIPO de produto (afeta Closer 100%; SDR exceto MQLs) -->
+    <div class="filter-type">
+      <span class="ft-label">Tipo</span>
+      <div class="ft-buttons">
+        <button class="ft-btn active" data-tipo="all">Tudo</button>
+        <button class="ft-btn" data-tipo="mba">MBA</button>
+        <button class="ft-btn" data-tipo="pos">Pós</button>
+        <button class="ft-btn" data-tipo="imersoes">Imersões</button>
+      </div>
     </div>
+    <div id="cChips" class="filter-chips"></div>
+    </div><!-- /filters-sticky -->
+
+    <!-- Ticker de destaques (altas/baixas passando) -->
+    <div id="cTicker" class="ticker" aria-label="Destaques do período"></div>
 
     <!-- ================= PANE SDR ================= -->
     <div id="paneSdr" class="pane">
@@ -64,22 +112,30 @@
         <div class="section-head"><div class="sec-left"><h2>Indicadores · SDR</h2></div><span class="sec-hint" id="cKpiSdrHint"></span></div>
         <div class="kpi-grid" id="cKpiSdr"></div>
       </section>
+
       <section class="section">
-        <div class="section-head"><div class="sec-left"><h2>Funil de qualificação</h2></div><span class="sec-hint">MQLs → Reuniões Qualificadas → No-show</span></div>
-        <div class="com-funil" id="cFunilSdr"></div>
+        <div class="grid-funil-canais">
+          <div class="fc-col">
+            <div class="section-head fc-head"><div class="sec-left"><h2>Funil de Vendas</h2></div><span class="sec-hint">MQLs → Reuniões → Reuniões Quali OK · <em>atividades</em></span></div>
+            <div class="com-funil" id="cFunilSdr"></div>
+          </div>
+          <div class="fc-col">
+            <div class="section-head fc-head"><div class="sec-left"><h2>Evolução mensal</h2></div><span class="sec-hint">MQLs · Reuniões Qualif.</span></div>
+            <div class="chart-box"><canvas id="cSerieSdr"></canvas></div>
+          </div>
+        </div>
       </section>
-      <section class="section">
-        <div class="section-head"><div class="sec-left"><h2>Evolução mensal · SDR</h2></div><span class="sec-hint">MQLs · Reuniões Qualificadas</span></div>
-        <div class="chart-box"><canvas id="cSerieSdr"></canvas></div>
-      </section>
+
       <section class="section">
         <div class="section-head"><div class="sec-left"><h2>Ranking de SDRs</h2></div><span class="sec-hint">Qualificações · Reuniões · No-show (automação à parte)</span></div>
         <div class="rank-table-wrap" id="cSdrs"></div>
       </section>
+
       <section class="section">
         <div class="section-head"><div class="sec-left"><h2>Reuniões Qualificadas · SDR × Dia</h2></div><select id="cSelSdr" class="sel-inline" aria-label="SDR"></select></div>
         <div class="hm-scroll"><div id="cReunDiaInner"></div></div>
       </section>
+
       <section class="section">
         <div class="section-head"><div class="sec-left"><h2>Eficiência · SDRs</h2></div><span class="sec-hint">Quem CONVERTE bem (não só volume)</span></div>
         <div class="rank-table-wrap" id="cEfSdr"></div>
@@ -92,18 +148,25 @@
         <div class="section-head"><div class="sec-left"><h2>Indicadores · Closer</h2></div><span class="sec-hint" id="cKpiCloserHint"></span></div>
         <div class="kpi-grid" id="cKpiCloser"></div>
       </section>
+
       <section class="section">
-        <div class="section-head"><div class="sec-left"><h2>Funil de fechamento</h2></div><span class="sec-hint">Reuniões Qualificadas → Vendas → Faturamento</span></div>
-        <div class="com-funil" id="cFunilCloser"></div>
+        <div class="grid-funil-canais">
+          <div class="fc-col">
+            <div class="section-head fc-head"><div class="sec-left"><h2>Funil de Vendas</h2></div><span class="sec-hint">Reuniões → Reuniões quali OK → Vendas · <em>negócios</em></span></div>
+            <div class="com-funil" id="cFunilCloser"></div>
+          </div>
+          <div class="fc-col">
+            <div class="section-head fc-head"><div class="sec-left"><h2>Evolução mensal</h2></div><span class="sec-hint">Vendas · Faturamento</span></div>
+            <div class="chart-box"><canvas id="cSerieCloser"></canvas></div>
+          </div>
+        </div>
       </section>
-      <section class="section">
-        <div class="section-head"><div class="sec-left"><h2>Evolução mensal · Closer</h2></div><span class="sec-hint">Vendas · Faturamento</span></div>
-        <div class="chart-box"><canvas id="cSerieCloser"></canvas></div>
-      </section>
+
       <section class="section">
         <div class="section-head"><div class="sec-left"><h2>Ranking de Closers</h2></div><span class="sec-hint" id="cClosersHint"></span></div>
         <div class="rank-table-wrap" id="cClosers"></div>
       </section>
+
       <section class="section">
         <div class="section-head">
           <div class="sec-left"><h2>Vendas · Closer × Dia <small style="font-weight:400;color:var(--text-soft)">(hover = faturamento)</small></h2></div>
@@ -114,14 +177,17 @@
         </div>
         <div class="hm-scroll"><div id="cVendaDiaInner"></div></div>
       </section>
+
       <section class="section">
         <div class="section-head"><div class="sec-left"><h2>Reuniões e Vendas por Curso</h2></div><select id="cSelCurso" class="sel-inline" aria-label="Curso"></select></div>
         <div class="rank-table-wrap" id="cCloserCurso"></div>
       </section>
+
       <section class="section">
         <div class="section-head"><div class="sec-left"><h2>Performance por Curso</h2></div><span class="sec-hint">Vendas · Ticket · Win rate · Conversão</span></div>
         <div class="rank-table-wrap" id="cCursoPerf"></div>
       </section>
+
       <section class="section">
         <div class="section-head"><div class="sec-left"><h2>Eficiência · Closers</h2></div><span class="sec-hint">Conversão RQ→Venda · Win rate · Ticket</span></div>
         <div class="rank-table-wrap" id="cEfCloser"></div>

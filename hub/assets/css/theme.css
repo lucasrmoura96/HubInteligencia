@@ -806,6 +806,44 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 /* ============================================================
    FILTROS
    ============================================================ */
+/* Camada de filtros FIXA no topo ao rolar (sempre visível p/ ler/ajustar o recorte) */
+.filters-sticky {
+  position: sticky; top: 0; z-index: 60;
+  background: var(--bg);
+  padding: var(--space-3) 0 var(--space-2);
+  margin-bottom: var(--space-4);
+  transition: box-shadow var(--t-base) var(--ease-apple);
+}
+.filters-sticky .filter-bar { margin-bottom: var(--space-2); }
+.filters-sticky .filter-type { margin-bottom: 0; }
+.filters-sticky.is-stuck { box-shadow: 0 10px 22px -16px rgba(0,0,0,0.5); }
+
+/* Chips do filtro ativo — resumo sempre visível do recorte (remover c/ 1 clique) */
+.filter-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: var(--space-2); }
+.filter-chips:empty { display: none; }
+.filter-chips .fc-lead { font-family: var(--font-display); font-size: 0.64rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-soft); }
+.fchip {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 0.78rem; font-weight: 600; color: var(--text);
+  padding: 4px 5px 4px 11px; border-radius: var(--radius-pill);
+  background: var(--surface); border: 1px solid var(--border-strong);
+}
+.fchip .fchip-k { color: var(--text-muted); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.fchip button {
+  border: 0; background: var(--surface-2); color: var(--text-muted);
+  width: 18px; height: 18px; border-radius: 50%; cursor: pointer;
+  display: grid; place-items: center; font-size: 0.72rem; line-height: 1;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.fchip button:hover { background: var(--negative); color: #fff; }
+.fchip.is-tipo { border-color: var(--brand-500); }
+.fchip.is-sel  { border-color: var(--accent-500); }
+.filter-chips .fc-clear {
+  font-family: var(--font-display); font-size: 0.7rem; font-weight: 600;
+  color: var(--text-muted); background: none; border: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+}
+.filter-chips .fc-clear:hover { color: var(--negative); }
+
 .filter-bar {
   display: flex; flex-wrap: wrap;
   align-items: center; gap: var(--space-3);
@@ -1480,16 +1518,24 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
   display: flex; flex-direction: column; align-items: center; gap: 0;
 }
 .fv-stage {
-  display: flex; align-items: center; justify-content: space-between;
-  min-width: 120px; max-width: 100%;
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  min-width: 96px; max-width: 100%;
   padding: 14px 22px; border-radius: 10px;
   color: #fff;
   box-shadow: 0 4px 14px rgba(0,0,0,0.12);
-  transition: width 0.5s var(--ease-apple);
+  transition: width 0.55s var(--ease-apple);
 }
-.fv-stage .fv-nome { font-family: var(--font-display); font-weight: 700; font-size: 0.9rem; letter-spacing: -0.01em; }
-.fv-stage .fv-val { font-family: var(--font-mono); font-weight: 700; font-size: 1.15rem; display: inline-flex; align-items: baseline; gap: 8px; }
+/* MQL = boca do funil; leve realce p/ indicar que é o topo (não está em escala real) */
+.fv-stage.fv-topo { box-shadow: 0 6px 20px rgba(59,130,246,0.30); }
+.fv-stage .fv-nome { font-family: var(--font-display); font-weight: 700; font-size: 0.9rem; letter-spacing: -0.01em; white-space: nowrap; }
+.fv-stage .fv-val { font-family: var(--font-mono); font-weight: 700; font-size: 1.15rem; }
 .fv-stage .fv-fat { font-size: 0.78rem; font-weight: 600; opacity: 0.9; }
+/* Faturamento minimalista, abaixo da barra de Vendas */
+.fv-cap {
+  font-family: var(--font-mono); font-weight: 700; font-size: 0.95rem;
+  color: var(--brand-600, #18a039); margin-top: 8px; text-align: center;
+}
+.fv-cap span { font-family: var(--font-display); font-weight: 600; font-size: 0.72rem; color: var(--text-muted); letter-spacing: 0.02em; }
 .fv-conn {
   font-family: var(--font-mono); font-size: 0.74rem; font-weight: 600;
   color: var(--text-muted); padding: 7px 0; text-align: center;
@@ -1539,6 +1585,56 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 @media (max-width: 1100px) { .kpi-grid-sec { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 560px)  { .kpi-grid-sec { grid-template-columns: repeat(2, 1fr); } }
 
+/* ============================================================
+   KPIs do COMERCIAL — LINHA ÚNICA enxuta (sem redundância).
+   Cada métrica aparece uma vez; a taxa vai no subtítulo.
+   Cards uniformes, centralizados, ordenados por fluxo de funil.
+   ============================================================ */
+/* neutraliza o split 0.8/1.3 do .kpi-grid herdado do MKT — comercial usa linha única */
+#cKpiSdr.kpi-grid,
+#cKpiCloser.kpi-grid { display: block; }
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+}
+#cKpiSdr .kpi-row { grid-template-columns: repeat(5, 1fr); }   /* SDR = 5 cards */
+.kpi-row .kpi-cell.uno {
+  align-items: center;
+  text-align: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-height: 150px;
+  padding: var(--space-4) var(--space-3) var(--space-3);
+  border-color: var(--brand-500);              /* borda verde no tom do logo */
+}
+.kpi-row .kpi-cell.uno:hover { border-color: var(--brand-600); }
+.kpi-row .kpi-cell.uno .kpi-label { justify-content: center; }
+.kpi-row .kpi-cell.uno .kpi-value {
+  font-size: clamp(1.4rem, 1.8vw, 1.9rem);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 100%;
+}
+.kpi-row .kpi-cell.uno .kpi-sub { margin-top: 0; }
+/* rodapé MoM — sempre na base do card */
+.kpi-row .kpi-cell.uno .kpi-mom-wrap {
+  margin-top: auto; padding-top: 10px; width: 100%;
+  display: flex; justify-content: center;
+}
+.kpi-mom {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700;
+  padding: 3px 10px; border-radius: var(--radius-pill);
+  letter-spacing: -0.01em; white-space: nowrap;
+}
+.kpi-mom small { font-weight: 600; opacity: 0.65; font-size: 0.82em; letter-spacing: 0.03em; }
+.kpi-mom.pos  { color: var(--positive); background: var(--positive-soft); }
+.kpi-mom.neg  { color: var(--negative); background: var(--negative-soft); }
+.kpi-mom.flat { color: var(--text-soft); background: var(--surface-2); }
+@media (max-width: 1200px) { #cKpiSdr .kpi-row { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 1000px) { .kpi-row, #cKpiSdr .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 540px)  { .kpi-row, #cKpiSdr .kpi-row { grid-template-columns: 1fr; } }
+
 .cf-nome small { color: var(--text-soft); font-weight: 400; }
 
 /* Pódio dos top closers */
@@ -1569,6 +1665,79 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 .podio-fat { font-family: var(--font-mono); font-weight: 700; font-size: 1.05rem; color: var(--brand-600, #1a8f37); margin-top: 4px; }
 .podio-sub { font-size: 0.74rem; color: var(--text-muted); margin-top: 2px; }
 .rank-table tr.sel { background: rgba(31,181,65,0.10); }
+
+/* Sparkline (mini-tendência nas tabelas de ranking) */
+.rank-table th.spark-th { text-align: center; width: 90px; white-space: nowrap; }
+.rank-table td.spark-td { text-align: center; vertical-align: middle; padding-top: 6px; padding-bottom: 6px; }
+.spark { display: inline-block; vertical-align: middle; }
+.spark-na { color: var(--text-soft); font-family: var(--font-mono); font-size: 0.8rem; }
+
+/* Ticker de destaques — barra fina com altas/baixas passando (estilo painel de bolsa) */
+.ticker {
+  display: block; cursor: default;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: var(--space-4); overflow: hidden;
+  transition: border-color var(--t-base);
+}
+.ticker.expanded { border-color: var(--brand-500); }
+.tk-bar { display: flex; align-items: center; gap: 14px; padding: 7px 14px; cursor: pointer; }
+.tk-tag {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--font-display); font-size: 0.62rem; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted);
+  white-space: nowrap; padding-right: 12px; border-right: 1px solid var(--border);
+}
+.tk-caret { color: var(--text-soft); transition: transform var(--t-base) var(--ease-apple); }
+.ticker.expanded .tk-caret { transform: rotate(180deg); }
+.tk-toggle-hint { margin-left: auto; flex: 0 0 auto; font-family: var(--font-display); font-size: 0.64rem; color: var(--text-soft); white-space: nowrap; opacity: 0; transition: opacity var(--t-base); }
+.tk-bar:hover .tk-toggle-hint, .ticker.expanded .tk-toggle-hint { opacity: 0.85; }
+.ticker.expanded .tk-viewport { display: none; }
+/* Painel estático (dropdown) com todos os destaques organizados */
+.tk-panel { display: none; }
+.ticker.expanded .tk-panel {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  gap: 0 36px; padding: 2px 14px 12px;
+}
+.tk-prow { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 0.76rem; }
+.tk-prow .tk-lab { flex: 0 0 auto; font-size: 0.6rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; padding-top: 1px; }
+.tk-prow-nome { flex: 1 1 auto; min-width: 0; font-weight: 700; font-size: 0.8rem; font-family: var(--font-display); color: var(--text); white-space: normal; word-break: break-word; }
+.tk-prow .tk-val { flex: 0 0 auto; font-family: var(--font-mono); font-weight: 700; font-size: 0.74rem; text-align: right; white-space: nowrap; }
+.tk-prow.pos .tk-val { color: var(--brand-600, #18a039); }
+.tk-prow.muted .tk-val { color: var(--text-muted); }
+.tk-pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--brand-500); box-shadow: 0 0 0 0 rgba(31,181,65,0.5); animation: tkpulse 2s infinite; }
+@keyframes tkpulse { 70% { box-shadow: 0 0 0 6px rgba(31,181,65,0); } 100% { box-shadow: 0 0 0 0 rgba(31,181,65,0); } }
+.tk-viewport {
+  flex: 1 1 auto; overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent);
+          mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent);
+}
+.tk-track { display: inline-flex; align-items: center; gap: 24px; white-space: nowrap; will-change: transform; animation: tkscroll 48s linear infinite; }
+.ticker:hover .tk-track { animation-play-state: paused; }
+@keyframes tkscroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.tk-item { font-size: 0.82rem; color: var(--text); white-space: nowrap; font-family: var(--font-display); display: inline-flex; align-items: baseline; gap: 6px; }
+.tk-item b { font-weight: 700; }
+.tk-item .tk-lab { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 700; }
+.tk-item .tk-val { font-family: var(--font-mono); font-weight: 700; font-size: 0.8rem; }
+.tk-item.pos   .tk-val { color: var(--brand-600, #18a039); }
+.tk-item.muted .tk-val { color: var(--text-muted); }
+.tk-sep { color: var(--text-soft); opacity: 0.45; }
+@media (prefers-reduced-motion: reduce) { .tk-track { animation: none; } }
+
+/* Drilldown nas tabelas comerciais (clicar na linha expande detalhes) */
+.rank-table tr.row-click { cursor: pointer; }
+.rank-table tr.row-click:hover { background: var(--surface-2); }
+.drill-caret { display: inline-block; color: var(--brand-600, #18a039); font-size: 0.78em; transition: transform 0.2s var(--ease-apple); }
+.rank-table tr.row-click.open .drill-caret { transform: rotate(90deg); }
+.rank-table tr.drill-row > td { padding: 0 !important; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.drill-box { padding: 10px var(--space-4) 12px; max-height: 340px; overflow-y: auto; }
+.drill-box::-webkit-scrollbar { width: 8px; }
+.drill-box::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+.drill-title { font-family: var(--font-display); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+.drill-item { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 0.84rem; }
+.drill-item:last-child { border-bottom: 0; }
+.drill-item .di-nome { font-weight: 600; color: var(--text); flex: 1; min-width: 0; }
+.drill-item .di-q { font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted); white-space: nowrap; }
+.drill-item .di-fat { font-family: var(--font-mono); font-weight: 700; color: var(--brand-600, #18a039); min-width: 96px; text-align: right; }
 
 /* Select inline no cabeçalho das seções comerciais */
 .sel-inline {
@@ -1753,7 +1922,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 }
 .kpi-cell {
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--brand-500);   /* borda verde da marca em todos os cards de KPI */
   border-radius: var(--radius-lg);
   padding: var(--space-4);
   display: flex; flex-direction: column;
@@ -1762,7 +1931,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
   transition: border-color var(--t-base);
   overflow: hidden;
 }
-.kpi-cell:hover { border-color: var(--border-strong); }
+.kpi-cell:hover { border-color: var(--brand-600); }
 .kpi-cell .kpi-label {
   font-family: var(--font-display);
   font-size: 0.72rem;
@@ -2137,9 +2306,13 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
   min-width: 0;
 }
 .fc-col > .funnel-vert,
-.fc-col > .canais-pagos {
+.fc-col > .canais-pagos,
+.fc-col > .com-funil,
+.fc-col > .chart-box {
   flex: 1 1 auto;   /* preenchem a altura igual da linha */
 }
+/* dentro do grid de duas colunas, o gráfico cresce com a coluna (não fixa 320px) */
+.fc-col > .chart-box { height: auto; min-height: 320px; }
 
 .funnel-vert {
   display: flex; flex-direction: column;

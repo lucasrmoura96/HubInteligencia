@@ -139,6 +139,49 @@ function labelPeriodoAtual() {
   return partes.length ? partes.join(' · ') : 'Período completo';
 }
 
+// ---------- Chips do filtro ativo (resumo do recorte, removível) ----------
+function mktPeriodoLabel() {
+  const f = STATE.filtro;
+  if (f.range) { const fmt = (s) => s.split('-').reverse().join('/'); return `${fmt(f.range.de)} → ${fmt(f.range.ate)}`; }
+  const mSel = mesesSelecionados(), dSel = diasSelecionados(), p = [];
+  if (dSel && dSel.length) p.push(dSel.length === 1 ? `Dia ${dSel[0]}` : `${dSel.length} dias`);
+  if (mSel && mSel.length) p.push(mSel.length === 1 ? MESES_NOMES[parseInt(mSel[0], 10) - 1] : `${mSel.length} meses`);
+  if (f.ano !== 'all') p.push(String(f.ano));
+  return p.length ? p.join(' · ') : null;
+}
+function resetPeriodoMkt() {
+  STATE.filtro = { ano:'all', mes:'all', dia:'all', range:null };
+  const selAno = document.getElementById('filtroAno'); if (selAno) selAno.value = 'all';
+  MS_INSTANCES.mes && MS_INSTANCES.mes.setValores([]); MS_INSTANCES.dia && MS_INSTANCES.dia.setValores([]);
+  const bp = document.getElementById('btnPersonalizado'); if (bp) { bp.classList.remove('has-range'); bp.textContent = 'Personalizado'; }
+  const rp = document.getElementById('rangePanel'); if (rp) rp.hidden = true;
+  const fb = document.querySelector('.filter-bar'); if (fb) fb.classList.remove('range-open');
+  clearPresets();
+}
+function renderChipsMkt() {
+  const host = document.getElementById('mktChips'); if (!host) return;
+  const chips = [];
+  const per = mktPeriodoLabel();
+  if (per) chips.push({ k:'Período', v: per, rem:'periodo' });
+  if (STATE.tipoCurso !== 'all') chips.push({ k:'Tipo', v: ({mba:'MBA',pos:'Pós',imersoes:'Imersões'})[STATE.tipoCurso] || STATE.tipoCurso, rem:'tipo', cls:'is-tipo' });
+  if (STATE.cursos && STATE.cursos.length) chips.push({ k:'Curso', v: STATE.cursos.length === 1 ? STATE.cursos[0] : `${STATE.cursos.length} cursos`, rem:'cursos', cls:'is-sel' });
+  if (!chips.length) { host.innerHTML = ''; return; }
+  host.innerHTML = `<span class="fc-lead">Filtros</span>` +
+    chips.map(c => `<span class="fchip ${c.cls||''}" data-rem="${c.rem}"><span class="fchip-k">${c.k}</span> ${escapeHtml(c.v)} <button type="button" aria-label="Remover ${c.k}">✕</button></span>`).join('') +
+    (chips.length > 1 ? `<button type="button" class="fc-clear" id="mktChipsClear">limpar tudo</button>` : '');
+  host.querySelectorAll('.fchip button').forEach(btn => {
+    btn.onclick = () => {
+      const rem = btn.closest('.fchip').dataset.rem;
+      if (rem === 'periodo') resetPeriodoMkt();
+      else if (rem === 'tipo') { STATE.tipoCurso = 'all'; document.querySelectorAll('.ft-btn').forEach(x => x.classList.toggle('active', x.dataset.tipo === 'all')); }
+      else if (rem === 'cursos') { STATE.cursos = []; MS_INSTANCES.curso && MS_INSTANCES.curso.setValores([]); }
+      renderAll();
+    };
+  });
+  const clr = document.getElementById('mktChipsClear');
+  if (clr) clr.onclick = () => { const b = document.getElementById('btnClear'); if (b) b.click(); };
+}
+
 // Classifica o curso por palavra-chave no nome
 function getCursoTipo(curso) {
   if (!curso) return 'outros';
@@ -916,9 +959,60 @@ function baseKpisZero() {
 // Quando filtro = mês em curso, compara proporcionalmente (mesmos dias)
 // ============================================================
 
+// Totais crus do TIPO/curso atual num único mês inteiro (leads/mqls/custo via por_curso_mensal;
+// reuniões/ganhos/faturamento via por_tipo_mensal). null em financeiro quando não há base.
+function rawTipoMes(ano, mes) {
+  const tab = STATE.data[STATE.tab];
+  const tipo = STATE.tipoCurso;
+  let leads = 0, mqls = 0, custo = 0;
+  (tab.por_curso_mensal || []).forEach(r => {
+    if (r.ano === ano && r.mes === mes && cursoAtivo(r.curso) && cursoMatchTipo(r.curso, tipo)) {
+      leads += r.leads; mqls += r.mqls; custo += r.custo;
+    }
+  });
+  let reunioes = null, ganhos = null, faturamento = null;
+  if (tipo !== 'all') {
+    const ptm = getPorTipoMensal() || [];
+    let has = false, re = 0, g = 0, f = 0;
+    ptm.forEach(r => { if (r.tipo === tipo && r.ano === ano && r.mes === mes) { re += r.reunioes; g += r.ganhos; f += r.faturamento; has = true; } });
+    if (has) { reunioes = re; ganhos = g; faturamento = f; }
+  }
+  return { leads, mqls, custo, reunioes, ganhos, faturamento };
+}
+// Monta o objeto de KPIs (com derivados) a partir de totais crus, preservando null no financeiro
+function montaKpisRaw(t) {
+  const { leads, mqls, custo, reunioes, ganhos, faturamento } = t;
+  return {
+    leads, mqls, custo, reunioes, ganhos, faturamento,
+    pct_mql: leads ? (mqls / leads * 100) : 0,
+    pct_mql_reuniao: (mqls && reunioes != null) ? (reunioes / mqls * 100) : 0,
+    pct_reuniao_ganho: (reunioes && ganhos != null) ? (ganhos / reunioes * 100) : 0,
+    cpl: leads ? (custo / leads) : 0,
+    cpmql: mqls ? (custo / mqls) : 0,
+    cpr: (reunioes != null && reunioes) ? (custo / reunioes) : 0,
+    ticket_medio: (ganhos != null && ganhos) ? (faturamento / ganhos) : 0,
+    roas: (custo && faturamento != null) ? (faturamento / custo) : 0,
+    cac: (ganhos != null && ganhos) ? (custo / ganhos) : 0,
+  };
+}
+
 // Agrega KPIs num período arbitrário
 function calcKpisPeriodo({ ano, mes, diaInicio = null, diaFim = null }) {
   const tab = STATE.data[STATE.tab];
+
+  // Filtro por TIPO de curso → agrega por_curso_mensal + por_tipo_mensal (mesma fonte da KPI atual)
+  if (STATE.tipoCurso !== 'all') {
+    const t = rawTipoMes(ano, mes);
+    if (diaInicio != null && diaFim != null) {
+      const diasNoMes = new Date(ano, mes, 0).getDate();
+      const propor = diasNoMes ? ((diaFim - diaInicio + 1) / diasNoMes) : 0;
+      t.leads = Math.round(t.leads * propor); t.mqls = Math.round(t.mqls * propor); t.custo = t.custo * propor;
+      if (t.reunioes != null) t.reunioes = Math.round(t.reunioes * propor);
+      if (t.ganhos != null) t.ganhos = Math.round(t.ganhos * propor);
+      if (t.faturamento != null) t.faturamento = t.faturamento * propor;
+    }
+    return montaKpisRaw(t);
+  }
 
   // Recorte por dias → REGRA DE 3 sobre o mês inteiro para TODAS as métricas
   // (mantém comparativo apples-to-apples proporcional: "o que seria o mês passado neste mesmo
@@ -995,8 +1089,7 @@ function calcKpisPeriodo({ ano, mes, diaInicio = null, diaFim = null }) {
 
 function calcKpisMesAnterior() {
   if (STATE.selecao) return null;
-  if (STATE.tipoCurso !== 'all') return null;
-  if (STATE.cursos && STATE.cursos.length) return null; // filtro de curso → desabilita MoM
+  if (STATE.cursos && STATE.cursos.length) return null; // filtro de curso individual → desabilita MoM
   if (STATE.filtro.range) return null;                  // range customizado → desabilita MoM
 
   const { ano } = STATE.filtro;
@@ -1036,7 +1129,7 @@ function calcKpisMesAnterior() {
 }
 
 function momLabel() {
-  if (STATE.selecao || STATE.tipoCurso !== 'all') return null;
+  if (STATE.selecao) return null;
   if (STATE.cursos && STATE.cursos.length) return null;
   if (STATE.filtro.range) return null;
   const { ano } = STATE.filtro;
@@ -1057,7 +1150,6 @@ function momLabel() {
 // YoY: mesmo período do ano anterior (mês, dia ou ano completo)
 function calcKpisAnoAnterior() {
   if (STATE.selecao) return null;
-  if (STATE.tipoCurso !== 'all') return null;
   if (STATE.cursos && STATE.cursos.length) return null;
   if (STATE.filtro.range) return null;
 
@@ -1097,6 +1189,20 @@ function calcKpisAnoAnterior() {
     return calcKpisPeriodo({ ano: anoAnt, mes: m });
   }
 
+  // Ano completo (filtro por TIPO) → soma todos os meses do ano anterior via rawTipoMes
+  if (STATE.tipoCurso !== 'all') {
+    const mesesAA = [...new Set((tab.por_curso_mensal || []).filter(r => r.ano === anoAnt).map(r => r.mes))];
+    if (!mesesAA.length) return null;
+    const t = mesesAA.reduce((a, mm) => {
+      const x = rawTipoMes(anoAnt, mm);
+      return {
+        leads: a.leads + x.leads, mqls: a.mqls + x.mqls, custo: a.custo + x.custo,
+        reunioes: a.reunioes + (x.reunioes || 0), ganhos: a.ganhos + (x.ganhos || 0), faturamento: a.faturamento + (x.faturamento || 0),
+      };
+    }, { leads: 0, mqls: 0, custo: 0, reunioes: 0, ganhos: 0, faturamento: 0 });
+    return montaKpisRaw(t);
+  }
+
   // Ano completo → soma todos meses do ano anterior
   const meses = (getMensal() || []).filter(x => x.ano === anoAnt);
   if (!meses.length) return null;
@@ -1121,7 +1227,7 @@ function calcKpisAnoAnterior() {
 }
 
 function yoyLabel() {
-  if (STATE.selecao || STATE.tipoCurso !== 'all') return null;
+  if (STATE.selecao) return null;
   if (STATE.cursos && STATE.cursos.length) return null;
   if (STATE.filtro.range) return null;
   const { ano } = STATE.filtro;
@@ -1727,7 +1833,7 @@ function renderSerieTemporal() {
       datasets: [
         { label: 'Leads', data: meses.map(m => m.leads), backgroundColor: colorVolSoft, borderRadius: 4, yAxisID: 'y', barPercentage: 0.6 },
         { label: 'MQLs',  data: meses.map(m => m.mqls),  backgroundColor: colorVol,     borderRadius: 4, yAxisID: 'y', barPercentage: 0.6 },
-        { label: 'Custo', data: meses.map(m => m.custo), type: 'line',
+        { label: 'Custo', data: meses.map(m => m.custo), type: 'line', order: -1,
           borderColor: colorCusto, backgroundColor: colorCusto + '22',
           borderWidth: 2, tension: 0.35, fill: false, yAxisID: 'y1',
           pointRadius: 3, pointBackgroundColor: colorCusto, pointHoverRadius: 5 },
@@ -2875,6 +2981,7 @@ function renderAll() {
     console.warn('renderAll abortado — STATE.data ausente. Rode "Atualizar HUB MKT.bat".');
     return;
   }
+  renderChipsMkt();             // chips do filtro ativo (resumo do recorte)
   renderSelectionBanner();
   renderEmptyStateBanner();     // banner topo quando filtro retorna zero
   renderKPIs();
@@ -3191,6 +3298,13 @@ function setupCanalDrawer() {
       clearPresets();
       const mb = document.querySelector('.preset[data-preset="month"]'); if (mb) mb.classList.add('active');
     } catch (e) { /* fallback: mantém 'Tudo' */ }
+  })();
+
+  // Sombra na barra de filtros quando "grudada" no topo
+  (function stickyShadow() {
+    const fs = document.querySelector('.filters-sticky'); if (!fs) return;
+    const on = () => fs.classList.toggle('is-stuck', fs.getBoundingClientRect().top <= 0.5);
+    window.addEventListener('scroll', on, { passive: true }); on();
   })();
 
   renderAll();
