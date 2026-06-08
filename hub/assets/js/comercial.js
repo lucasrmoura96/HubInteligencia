@@ -53,6 +53,8 @@ const escC = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&
 const CS = { data: null, filtro: { ano: 'all', mes: 'all', dia: 'all', range: null }, closerSel: null,
              selSdr: 'todos', selCloser: 'todos', selCurso: 'todos', selCursoVenda: 'todos',
              tipoCurso: 'all',   // all | mba | pos | imersoes (filtro de tipo de produto)
+             cursoSel: null,     // recorte por 1 produto (aba Closer) — exclui closerSel
+             sdrSel: null,       // recorte por 1 SDR (aba SDR)
              aba: 'sdr' };
 // Classificação de produto por tipo (mesma regra do painel MKT)
 function getCursoTipoC(curso) {
@@ -179,8 +181,21 @@ function serieCloserTipo(closerNome) {
   });
   return Object.values(acc);
 }
-// Fonte de dados: respeita filtro de TIPO + cross-filter de closer
+// Série mensal (estilo CS.data.mensal) de UM curso — métricas de negócio do curso_mensal
+function serieCursoMensal(curso) {
+  const acc = {};
+  (CS.data.curso_mensal || []).forEach(r => {
+    if (r.curso !== curso) return;
+    const k = r.ano + '-' + r.mes;
+    const A = acc[k] || (acc[k] = { ano:r.ano, mes:r.mes, mqls:0, criados:0, ganhos:0, perdidos:0, faturamento:0, qualificados:0, com_reuniao:0, reunioes_qualificadas:0, com_proposta:0, no_show:0, abertos:0 });
+    A.criados+=r.criados; A.ganhos+=r.ganhos; A.perdidos+=r.perdidos; A.faturamento+=r.faturamento;
+    A.qualificados+=r.qualificados; A.com_reuniao+=r.com_reuniao; A.reunioes_qualificadas+=r.rq;
+  });
+  return Object.values(acc);
+}
+// Fonte de dados: recorte por CURSO (precedência) > TIPO > cross-filter de closer
 function serieAtiva() {
+  if (CS.cursoSel) return serieCursoMensal(CS.cursoSel);
   if (CS.tipoCurso !== 'all') return serieCloserTipo(CS.closerSel || null);
   if (CS.closerSel) {
     const c = (CS.data.closers || []).find(x => x.nome === CS.closerSel);
@@ -195,13 +210,13 @@ function getSdrMensal() {
   const acc = {};
   const get = (a, me) => (acc[a + '-' + me] || (acc[a + '-' + me] = { ano:a, mes:me, mqls:0, propostas:0, reunioes_total:0, reunioes_ok:0, no_show:0 }));
   if (CS.tipoCurso !== 'all') {
-    (CS.data.sdr_tipo_mensal || []).forEach(r => { if (r.tipo !== CS.tipoCurso) return;
+    (CS.data.sdr_tipo_mensal || []).forEach(r => { if (r.tipo !== CS.tipoCurso) return; if (CS.sdrSel && r.sdr !== CS.sdrSel) return;
       const A = get(r.ano, r.mes); A.propostas+=r.propostas; A.reunioes_total+=r.reunioes_total; A.reunioes_ok+=r.reunioes_ok; A.no_show+=r.no_show; });
   } else {
-    (CS.data.sdrs || []).forEach(s => (s.mensal || []).forEach(m => {
+    (CS.data.sdrs || []).forEach(s => { if (CS.sdrSel && s.nome !== CS.sdrSel) return; (s.mensal || []).forEach(m => {
       const A = get(m.ano, m.mes);
       A.propostas += m.propostas||0; A.reunioes_total += m.reunioes_total||0; A.reunioes_ok += m.reunioes_ok||0; A.no_show += m.no_show||0;
-    }));
+    }); });
   }
   // MQLs SEMPRE totais — o RD Station não separa por produto/tipo
   (CS.data.mensal || []).forEach(m => { get(m.ano, m.mes).mqls += m.mqls||0; });
@@ -209,14 +224,15 @@ function getSdrMensal() {
 }
 // SDRs como entidades {nome,is_bot,sem,mensal} respeitando o tipo (p/ ranking e eficiência)
 function sdrEntidades() {
-  if (CS.tipoCurso === 'all') return (CS.data.sdrs || []).map(s => ({ nome:s.nome, is_bot:s.is_bot, sem:s.sem_sdr, mensal:s.mensal }));
+  const soUm = (arr) => CS.sdrSel ? arr.filter(s => s.nome === CS.sdrSel) : arr;
+  if (CS.tipoCurso === 'all') return soUm((CS.data.sdrs || []).map(s => ({ nome:s.nome, is_bot:s.is_bot, sem:s.sem_sdr, mensal:s.mensal })));
   const meta = {}; (CS.data.sdrs || []).forEach(s => meta[s.nome] = s);
   const byS = {};
   (CS.data.sdr_tipo_mensal || []).forEach(r => { if (r.tipo !== CS.tipoCurso) return; (byS[r.sdr] = byS[r.sdr] || []).push(r); });
-  return Object.entries(byS).map(([nome, rows]) => ({
+  return soUm(Object.entries(byS).map(([nome, rows]) => ({
     nome, is_bot: meta[nome] ? meta[nome].is_bot : /bot/i.test(nome), sem: meta[nome] ? meta[nome].sem_sdr : (nome === '(sem SDR)'),
     mensal: rows.map(r => ({ ano:r.ano, mes:r.mes, propostas:r.propostas, reunioes_total:r.reunioes_total, reunioes_ok:r.reunioes_ok, no_show:r.no_show })),
-  }));
+  })));
 }
 function somaSdr(serie) {
   const acc = { mqls:0, propostas:0, reunioes_total:0, reunioes_ok:0, no_show:0 };
@@ -325,10 +341,11 @@ function momBadge(cur, prev, opts) {
   const cls = flat ? 'flat' : (bom ? 'pos' : 'neg');
   const seta = flat ? '→' : (subiu ? '↑' : '↓');
   const pct = Math.abs(diff).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+  const tag = opts.tag || 'MoM';
   const titulo = opts.partial
-    ? `Comparado proporcionalmente a ${opts.dCur} dia(s) do mês anterior (mês corrente ainda em curso)`
-    : 'Comparado ao mês anterior';
-  return `<span class="kpi-mom ${cls}" title="${titulo}">${seta} ${pct}% <small>MoM</small></span>`;
+    ? `${tag !== 'MoM' ? tag + ' · ' : ''}Comparado proporcionalmente a ${opts.dCur} dia(s) do mês anterior (mês corrente ainda em curso)`
+    : `${tag !== 'MoM' ? tag + ' · ' : ''}Comparado ao mês anterior`;
+  return `<span class="kpi-mom ${cls}" title="${titulo}">${seta} ${pct}% <small>${tag}</small></span>`;
 }
 
 function renderKpisSdr() {
@@ -339,12 +356,17 @@ function renderKpisSdr() {
   const M = (key, inverter) => prev ? momBadge(k[key], prev[key], { fator: info.fator, partial: info.partial, dCur: info.dCur, inverter }) : '';
   // Linha única, ordem de funil: topo → reuniões → qualificadas → perdas → caminho alternativo
   const mqlSub = CS.tipoCurso === 'all' ? 'leads de topo · RD' : 'todos os produtos · RD não separa';
+  // Vendas = resultado do time (negócios ganhos); respeita o tipo. MoM de vendas E de faturamento.
+  const vSerie = (CS.tipoCurso !== 'all') ? serieCloserTipo(null) : CS.data.mensal;
+  const vk = somaMeses(vSerie);
+  const vprev = info.ok ? _prevAcc(vSerie, info, ['ganhos', 'faturamento']) : null;
+  const Mv = (key, tag) => vprev ? momBadge(vk[key], vprev[key], { fator: info.fator, partial: info.partial, dCur: info.dCur, tag }) : '';
   document.getElementById('cKpiSdr').innerHTML = `<div class="kpi-row">
     ${kUno('MQLs', cN(k.mqls), mqlSub, M('mqls'))}
     ${kUno('Reuniões realizadas', cN(k.reunioes_total), 'total no período', M('reunioes_total'))}
     ${kUno('Reuniões Qualif.', cN(k.reunioes_ok), `aproveitamento ${cPct(k.aproveitamento)}`, M('reunioes_ok'))}
     ${kUno('No-show', cN(k.no_show), `${cPct(k.no_show_rate)} das agendadas`, M('no_show', true))}
-    ${kUno('Proposta wpp', cN(k.propostas), 'via WhatsApp', M('propostas'))}
+    ${kUno('Vendas', cN(vk.ganhos), `${cR$(vk.faturamento)} em faturamento`, Mv('ganhos', 'vendas') + Mv('faturamento', 'R$'))}
   </div>`;
 }
 
@@ -528,9 +550,11 @@ function renderFunilGenerico(innerId, etapas) {
 }
 function renderFunilSdr() {
   const k = somaSdr(getSdrMensal());
+  const vk = somaMeses((CS.tipoCurso !== 'all') ? serieCloserTipo(null) : CS.data.mensal);   // vendas do time
   const etapas = [
     { etapa: 'Reuniões', valor: k.reunioes_total, cor: '#1fb541' },
     { etapa: 'Reuniões Quali OK', valor: k.reunioes_ok, cor: '#0f7c2e' },
+    { etapa: 'Vendas', valor: vk.ganhos, faturamento: vk.faturamento, cor: '#0a5c22' },
   ];
   // MQLs (RD) não têm produto/tipo → só entram no funil quando NÃO há filtro de tipo
   if (CS.tipoCurso === 'all') etapas.unshift({ etapa: 'MQLs', valor: k.mqls, cor: '#3b82f6', topo: true });
@@ -549,6 +573,18 @@ function renderFunilCloser() {
 // Entidades que NÃO são closers-pessoa (saem do pódio humano)
 const CLOSER_AUTO = new Set(['SelfCheckout', 'Consulta Comercial', 'Closer Externo']);
 function closersAgreg() {
+  // Recorte por CURSO: ranking de closers naquele produto (closer_curso_mensal: vendas/fat/reuniões)
+  if (CS.cursoSel) {
+    const acc = {};
+    (CS.data.closer_curso_mensal || []).forEach(r => {
+      if (r.curso !== CS.cursoSel || !cTupleAtivo(r.ano, r.mes)) return;
+      const A = acc[r.closer] || (acc[r.closer] = { nome: r.closer, auto: CLOSER_AUTO.has(r.closer), criados: null, ganhos: 0, win: null, fat: 0, ticket: 0, mensal: [] });
+      A.ganhos += r.vendas; A.fat += r.faturamento;
+      A.mensal.push({ ano: r.ano, mes: r.mes, faturamento: r.faturamento });
+    });
+    return Object.values(acc).map(c => ({ ...c, ticket: c.ganhos ? c.fat / c.ganhos : 0 }))
+      .filter(c => c.ganhos > 0).sort((a, b) => b.fat - a.fat);
+  }
   const fonte = (CS.tipoCurso !== 'all')
     ? [...new Set((CS.data.closer_tipo_mensal || []).filter(r => r.tipo === CS.tipoCurso).map(r => r.closer))].map(nome => ({ nome, mensal: serieCloserTipo(nome) }))
     : (CS.data.closers || []);
@@ -599,8 +635,8 @@ function renderClosersC() {
     el.addEventListener('click', () => {
       const nome = el.getAttribute('data-closer');
       CS.closerSel = (CS.closerSel === nome) ? null : nome;
+      if (CS.closerSel) CS.cursoSel = null;
       renderAllC();
-      renderBannerC();
     });
   });
 }
@@ -749,8 +785,9 @@ function renderHeatmap(innerId, rows, pessoaCampo, valorCampo, corRGB, fatCampo)
 
 // ---------- Reuniões Qualificadas: SDR × Dia ----------
 function renderReunDia() {
+  const sdrEf = CS.sdrSel || (CS.selSdr !== 'todos' ? CS.selSdr : null);
   const rows = (CS.data.sdr_reunioes_diario || [])
-    .filter(r => dataNoFiltro(r.data) && (CS.selSdr === 'todos' || r.sdr === CS.selSdr))
+    .filter(r => dataNoFiltro(r.data) && (!sdrEf || r.sdr === sdrEf))
     .map(r => ({ sdr: r.sdr, data: r.data, v: r.qtd_ok || 0 }));
   renderHeatmap('cReunDiaInner', rows, 'sdr', 'v', '59,130,246');
 }
@@ -759,10 +796,12 @@ function renderReunDia() {
 function renderVendaDia() {
   // usa o dado diário por closer+curso; soma cursos quando "todos"
   const fonte = CS.data.venda_closer_curso_diario || [];
+  const closerEf = CS.closerSel || (CS.selCloser !== 'todos' ? CS.selCloser : null);
+  const cursoEf = CS.cursoSel || (CS.selCursoVenda !== 'todos' ? CS.selCursoVenda : null);
   const rows = fonte
     .filter(r => dataNoFiltro(r.data)
-      && (CS.selCloser === 'todos' || r.closer === CS.selCloser)
-      && (CS.selCursoVenda === 'todos' || r.curso === CS.selCursoVenda)
+      && (!closerEf || r.closer === closerEf)
+      && (!cursoEf || r.curso === cursoEf)
       && cursoMatchTipoC(r.curso, CS.tipoCurso))
     .map(r => ({ closer: r.closer, data: r.data, v: r.qtd, fat: r.faturamento }));
   renderHeatmap('cVendaDiaInner', rows, 'closer', 'v', '31,181,65', 'fat');
@@ -784,8 +823,9 @@ function wireDrill(host) {
 
 // ---------- Closer × Curso ----------
 function renderCloserCursoC() {
+  const cursoEf = CS.cursoSel || (CS.selCurso !== 'todos' ? CS.selCurso : null);
   const rows = (CS.data.closer_curso_mensal || []).filter(r =>
-    cTupleAtivo(r.ano, r.mes) && (CS.selCurso === 'todos' || r.curso === CS.selCurso) && cursoMatchTipoC(r.curso, CS.tipoCurso));
+    cTupleAtivo(r.ano, r.mes) && (!cursoEf || r.curso === cursoEf) && cursoMatchTipoC(r.curso, CS.tipoCurso));
   const acc = {};
   rows.forEach(r => {
     const A = acc[r.closer] || (acc[r.closer] = { closer: r.closer, reunioes: 0, vendas: 0, faturamento: 0, cursos: {} });
@@ -848,6 +888,8 @@ function renderChipsC() {
   if (per) chips.push({ k:'Período', v: per, rem:'periodo' });
   if (CS.tipoCurso !== 'all') chips.push({ k:'Tipo', v: ({mba:'MBA',pos:'Pós',imersoes:'Imersões'})[CS.tipoCurso] || CS.tipoCurso, rem:'tipo', cls:'is-tipo' });
   if (CS.closerSel) chips.push({ k:'Closer', v: CS.closerSel, rem:'closer', cls:'is-sel' });
+  if (CS.cursoSel) chips.push({ k:'Curso', v: lblCurso(CS.cursoSel), rem:'curso', cls:'is-sel' });
+  if (CS.sdrSel) chips.push({ k:'SDR', v: CS.sdrSel, rem:'sdr', cls:'is-sel' });
   if (!chips.length) { host.innerHTML = ''; return; }
   host.innerHTML = `<span class="fc-lead">Filtros</span>` +
     chips.map(c => `<span class="fchip ${c.cls||''}" data-rem="${c.rem}"><span class="fchip-k">${c.k}</span> ${escC(c.v)} <button type="button" aria-label="Remover ${c.k}">✕</button></span>`).join('') +
@@ -858,6 +900,8 @@ function renderChipsC() {
       if (rem === 'periodo') resetPeriodoC();
       else if (rem === 'tipo') { CS.tipoCurso = 'all'; document.querySelectorAll('.filter-type .ft-btn').forEach(x => x.classList.toggle('active', x.dataset.tipo === 'all')); }
       else if (rem === 'closer') CS.closerSel = null;
+      else if (rem === 'curso') CS.cursoSel = null;
+      else if (rem === 'sdr') CS.sdrSel = null;
       renderAllC();
     };
   });
@@ -866,6 +910,27 @@ function renderChipsC() {
 }
 // alias mantido (chamadas antigas chamavam renderBannerC)
 function renderBannerC() { renderChipsC(); }
+
+// ---------- Filtros de recorte (Closer/Curso na aba Closer; SDR na aba SDR) ----------
+function renderRecorteFiltros() {
+  const host = document.getElementById('cRecorte'); if (!host) return;
+  const opt = (lista, sel, ph) => `<option value="">${ph}</option>` +
+    lista.map(v => `<option value="${escC(v)}"${v === sel ? ' selected' : ''}>${escC(v)}</option>`).join('');
+  const byName = (a, b) => String(a).localeCompare(String(b), 'pt-BR');
+  if (CS.aba === 'closer') {
+    const closers = (CS.data.closers || []).map(c => c.nome).sort(byName);
+    const cursos = (((CS.data.filtros_disponiveis || {}).produtos) || []).slice().sort(byName);
+    host.innerHTML =
+      `<select id="cFiltroCloser" class="sel-inline" aria-label="Filtrar por closer">${opt(closers, CS.closerSel, 'Closer: todos')}</select>` +
+      `<select id="cFiltroCurso" class="sel-inline" aria-label="Filtrar por curso">${opt(cursos, CS.cursoSel, 'Curso: todos')}</select>`;
+    document.getElementById('cFiltroCloser').onchange = (e) => { CS.closerSel = e.target.value || null; if (CS.closerSel) CS.cursoSel = null; renderAllC(); };
+    document.getElementById('cFiltroCurso').onchange = (e) => { CS.cursoSel = e.target.value || null; if (CS.cursoSel) CS.closerSel = null; renderAllC(); };
+  } else {
+    const sdrs = (CS.data.sdrs || []).map(s => s.nome).sort(byName);
+    host.innerHTML = `<select id="cFiltroSdr" class="sel-inline" aria-label="Filtrar por SDR">${opt(sdrs, CS.sdrSel, 'SDR: todos')}</select>`;
+    document.getElementById('cFiltroSdr').onchange = (e) => { CS.sdrSel = e.target.value || null; renderAllC(); };
+  }
+}
 
 // Pílula colorida de taxa (good/mid/bad). inverted=true => menor é melhor (no-show)
 function pillC(v, good, mid, inverted = false) {
@@ -878,7 +943,7 @@ function pillC(v, good, mid, inverted = false) {
 // ---------- Performance por Curso ----------
 function renderCursoPerf() {
   const acc = {};
-  (CS.data.curso_mensal || []).filter(r => cTupleAtivo(r.ano, r.mes) && cursoMatchTipoC(r.curso, CS.tipoCurso)).forEach(r => {
+  (CS.data.curso_mensal || []).filter(r => cTupleAtivo(r.ano, r.mes) && cursoMatchTipoC(r.curso, CS.tipoCurso) && (!CS.cursoSel || r.curso === CS.cursoSel)).forEach(r => {
     const A = acc[r.curso] || (acc[r.curso] = { criados:0, ganhos:0, perdidos:0, fat:0, reunioes:0 });
     A.criados += r.criados; A.ganhos += r.ganhos; A.perdidos += r.perdidos; A.fat += r.faturamento; A.reunioes += (r.com_reuniao || 0);
   });
@@ -1054,7 +1119,7 @@ function renderAtiva() {
   }
 }
 // Alias mantido (todos os handlers de filtro chamam renderAllC)
-function renderAllC() { renderAtiva(); renderChipsC(); renderTicker(); }
+function renderAllC() { renderAtiva(); renderChipsC(); renderTicker(); renderRecorteFiltros(); }
 
 function setupTabsC() {
   document.querySelectorAll('.tabs-funnel .tab-funnel[data-aba]').forEach(b => {
@@ -1062,12 +1127,11 @@ function setupTabsC() {
     b.onclick = () => {
       if (CS.aba === b.dataset.aba) return;
       CS.aba = b.dataset.aba;
-      CS.closerSel = null;  // cross-filter de closer não faz sentido entre abas
+      CS.closerSel = null; CS.cursoSel = null; CS.sdrSel = null;  // recortes são por aba
       document.querySelectorAll('.tabs-funnel .tab-funnel').forEach(x => x.classList.toggle('active', x.dataset.aba === CS.aba));
       document.getElementById('paneSdr').classList.toggle('hidden', CS.aba !== 'sdr');
       document.getElementById('paneCloser').classList.toggle('hidden', CS.aba !== 'closer');
-      renderBannerC();
-      renderAtiva();
+      renderAllC();
     };
   });
   document.getElementById('paneSdr').classList.toggle('hidden', CS.aba !== 'sdr');
@@ -1158,7 +1222,7 @@ function setupFiltrosC() {
 
   // Limpar tudo
   document.getElementById('cClear').onclick = () => {
-    CS.filtro = { ano:'all', mes:'all', dia:'all', range:null }; CS.closerSel = null; CS.tipoCurso = 'all';
+    CS.filtro = { ano:'all', mes:'all', dia:'all', range:null }; CS.closerSel = null; CS.tipoCurso = 'all'; CS.cursoSel = null; CS.sdrSel = null;
     document.querySelectorAll('.filter-type .ft-btn').forEach(x => x.classList.toggle('active', x.dataset.tipo === 'all'));
     selA.value='all'; MS_C.mes.setValores([]); MS_C.dia.setValores([]);
     if (btnPers){ btnPers.classList.remove('has-range'); btnPers.textContent='Personalizado'; if(rangePanel) rangePanel.hidden=true; }

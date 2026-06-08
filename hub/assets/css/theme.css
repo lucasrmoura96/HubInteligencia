@@ -816,6 +816,9 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 }
 .filters-sticky .filter-bar { margin-bottom: var(--space-2); }
 .filters-sticky .filter-type { margin-bottom: 0; }
+/* Recorte por pessoa/produto — à direita da linha de Tipo */
+.filter-type .ft-recorte { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filter-type .ft-recorte .sel-inline { max-width: 230px; }
 .filters-sticky.is-stuck { box-shadow: 0 10px 22px -16px rgba(0,0,0,0.5); }
 
 /* Chips do filtro ativo — resumo sempre visível do recorte (remover c/ 1 clique) */
@@ -1619,7 +1622,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 /* rodapé MoM — sempre na base do card */
 .kpi-row .kpi-cell.uno .kpi-mom-wrap {
   margin-top: auto; padding-top: 10px; width: 100%;
-  display: flex; justify-content: center;
+  display: flex; justify-content: center; flex-wrap: wrap; gap: 5px;
 }
 .kpi-mom {
   display: inline-flex; align-items: center; gap: 5px;
@@ -2294,6 +2297,9 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
   gap: var(--space-4);
   align-items: stretch;
 }
+/* Comercial: funil de vendas e evolução mensal dividem o espaço 50/50 */
+#paneSdr .grid-funil-canais,
+#paneCloser .grid-funil-canais { grid-template-columns: 1fr 1fr; }
 @media (max-width: 1100px) {
   .grid-funil-canais { grid-template-columns: 1fr; }
 }
