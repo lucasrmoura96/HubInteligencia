@@ -247,7 +247,13 @@
         <div class="sec-left">
           <h2 id="mqlDiarioTitle">MQLs por dia</h2>
         </div>
-        <span class="sec-hint" id="mqlDiarioHint">Período completo</span>
+        <div class="sec-right" style="display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end;">
+          <div class="view-seg" id="mqlViewSeg" role="group" aria-label="Visão do gráfico de MQLs">
+            <button class="vs-btn active" data-view="diario">Diário</button>
+            <button class="vs-btn" data-view="mensal">Mensal</button>
+          </div>
+          <span class="sec-hint" id="mqlDiarioHint">Período completo</span>
+        </div>
       </div>
       <div class="diario-chart-wrap">
         <div class="diario-chart-scroll" id="mqlDiarioScroll">

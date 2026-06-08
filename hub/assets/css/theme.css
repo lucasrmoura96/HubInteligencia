@@ -816,9 +816,12 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 }
 .filters-sticky .filter-bar { margin-bottom: var(--space-2); }
 .filters-sticky .filter-type { margin-bottom: 0; }
-/* Recorte por pessoa/produto — à direita da linha de Tipo */
-.filter-type .ft-recorte { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.filter-type .ft-recorte .sel-inline { max-width: 230px; }
+/* Recorte por pessoa/produto — à direita da linha de Tipo.
+   .filter-type pode quebrar como bloco; mas os selects Closer + Curso
+   ficam SEMPRE lado a lado (nowrap), nunca empilhados. */
+.filters-sticky .filter-type { flex-wrap: wrap; max-width: none; width: 100%; }
+.filter-type .ft-recorte { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+.filter-type .ft-recorte .sel-inline { min-width: 150px; max-width: 210px; }
 .filters-sticky.is-stuck { box-shadow: 0 10px 22px -16px rgba(0,0,0,0.5); }
 
 /* Chips do filtro ativo — resumo sempre visível do recorte (remover c/ 1 clique) */
@@ -1625,11 +1628,13 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
   display: flex; justify-content: center; flex-wrap: wrap; gap: 5px;
 }
 .kpi-mom {
-  display: inline-flex; align-items: center; gap: 5px;
+  display: inline-flex; align-items: center; gap: 6px;
   font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700;
   padding: 3px 10px; border-radius: var(--radius-pill);
   letter-spacing: -0.01em; white-space: nowrap;
 }
+.kpi-mom .km-pct { display: inline-flex; align-items: center; gap: 5px; }
+.kpi-mom .km-vol { font-weight: 600; font-size: 0.86em; opacity: 0.62; }
 .kpi-mom small { font-weight: 600; opacity: 0.65; font-size: 0.82em; letter-spacing: 0.03em; }
 .kpi-mom.pos  { color: var(--positive); background: var(--positive-soft); }
 .kpi-mom.neg  { color: var(--negative); background: var(--negative-soft); }
@@ -2218,7 +2223,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 
 /* Badge MoM/YoY — sutil dentro da sublabel */
 .kpi-yoy {
-  display: inline-flex; align-items: center;
+  display: inline-flex; align-items: center; gap: 5px;
   font-family: var(--font-mono);
   font-size: 0.58rem;             /* reduzido ~1.5px (era 0.66rem) */
   font-weight: 600;
@@ -2229,6 +2234,34 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
   background: var(--surface-2);
   line-height: 1.4;
 }
+.kpi-yoy .km-pct { display: inline-flex; align-items: center; }
+.kpi-yoy .km-vol { font-weight: 500; opacity: 0.62; }
+
+/* Toggle segmentado de visão (Diário / Mensal) — no cabeçalho do gráfico de MQLs */
+.view-seg {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 3px;
+  gap: 2px;
+}
+.view-seg .vs-btn {
+  font-family: var(--font-display);
+  font-size: 0.74rem; font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: transparent; border: 0; cursor: pointer;
+  padding: 4px 12px; border-radius: var(--radius-pill);
+  transition: color var(--t-base) var(--ease-apple), background var(--t-base) var(--ease-apple);
+}
+.view-seg .vs-btn:hover { color: var(--text); }
+.view-seg .vs-btn.active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
+  box-shadow: 0 3px 10px rgba(31, 181, 65, 0.25);
+}
+.view-seg .vs-btn:focus-visible { outline: 0; box-shadow: 0 0 0 4px rgba(31, 181, 65, 0.2); }
 /* Espaçamento extra entre badges (MoM + YoY) */
 .kpi-yoy + .kpi-yoy { margin-left: 4px; }
 .kpi-yoy.up   { color: var(--positive); background: var(--positive-soft); }

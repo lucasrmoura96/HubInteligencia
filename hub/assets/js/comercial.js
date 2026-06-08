@@ -345,7 +345,10 @@ function momBadge(cur, prev, opts) {
   const titulo = opts.partial
     ? `${tag !== 'MoM' ? tag + ' · ' : ''}Comparado proporcionalmente a ${opts.dCur} dia(s) do mês anterior (mês corrente ainda em curso)`
     : `${tag !== 'MoM' ? tag + ' · ' : ''}Comparado ao mês anterior`;
-  return `<span class="kpi-mom ${cls}" title="${titulo}">${seta} ${pct}% <small>${tag}</small></span>`;
+  // Volume que a % representa: o valor do mês anterior (base, proporcional se mês corrente). Ao lado da %.
+  const fmt = opts.fmt || cNr;
+  const volHtml = `<span class="km-vol">de ${fmt(base)}</span>`;
+  return `<span class="kpi-mom ${cls}" title="${titulo}"><span class="km-pct">${seta} ${pct}% <small>${tag}</small></span>${volHtml}</span>`;
 }
 
 function renderKpisSdr() {
@@ -353,20 +356,20 @@ function renderKpisSdr() {
   const hint = document.getElementById('cKpiSdrHint'); if (hint) hint.textContent = labelPeriodoC();
   const info = momInfo();
   const prev = info.ok ? sdrPrevAcc(info) : null;
-  const M = (key, inverter) => prev ? momBadge(k[key], prev[key], { fator: info.fator, partial: info.partial, dCur: info.dCur, inverter }) : '';
+  const M = (key, inverter) => prev ? momBadge(k[key], prev[key], { fator: info.fator, partial: info.partial, dCur: info.dCur, inverter, fmt: cNr }) : '';
   // Linha única, ordem de funil: topo → reuniões → qualificadas → perdas → caminho alternativo
   const mqlSub = CS.tipoCurso === 'all' ? 'leads de topo · RD' : 'todos os produtos · RD não separa';
   // Vendas = resultado do time (negócios ganhos); respeita o tipo. MoM de vendas E de faturamento.
   const vSerie = (CS.tipoCurso !== 'all') ? serieCloserTipo(null) : CS.data.mensal;
   const vk = somaMeses(vSerie);
   const vprev = info.ok ? _prevAcc(vSerie, info, ['ganhos', 'faturamento']) : null;
-  const Mv = (key, tag) => vprev ? momBadge(vk[key], vprev[key], { fator: info.fator, partial: info.partial, dCur: info.dCur, tag }) : '';
+  const Mv = (key, tag, fmt) => vprev ? momBadge(vk[key], vprev[key], { fator: info.fator, partial: info.partial, dCur: info.dCur, tag, fmt: fmt || cNr }) : '';
   document.getElementById('cKpiSdr').innerHTML = `<div class="kpi-row">
     ${kUno('MQLs', cN(k.mqls), mqlSub, M('mqls'))}
     ${kUno('Reuniões realizadas', cN(k.reunioes_total), 'total no período', M('reunioes_total'))}
     ${kUno('Reuniões Qualif.', cN(k.reunioes_ok), `aproveitamento ${cPct(k.aproveitamento)}`, M('reunioes_ok'))}
     ${kUno('No-show', cN(k.no_show), `${cPct(k.no_show_rate)} das agendadas`, M('no_show', true))}
-    ${kUno('Vendas', cN(vk.ganhos), `${cR$(vk.faturamento)} em faturamento`, Mv('ganhos', 'vendas') + Mv('faturamento', 'R$'))}
+    ${kUno('Vendas', cN(vk.ganhos), `${cR$(vk.faturamento)} em faturamento`, Mv('ganhos', 'vendas', cNr) + Mv('faturamento', 'R$', cR$))}
   </div>`;
 }
 
@@ -374,14 +377,14 @@ function renderKpisCloser() {
   const k = derivar(somaMeses(serieAtiva()));
   const info = momInfo();
   const prev = info.ok ? closerPrevAcc(info) : null;
-  const M = (key, inverter) => prev ? momBadge(k[key], prev[key], { fator: info.fator, partial: info.partial, dCur: info.dCur, inverter }) : '';
+  const M = (key, inverter, fmt) => prev ? momBadge(k[key], prev[key], { fator: info.fator, partial: info.partial, dCur: info.dCur, inverter, fmt: fmt || cNr }) : '';
   const hint = document.getElementById('cKpiCloserHint'); if (hint) hint.textContent = labelPeriodoC();
   // Linha única, ordem de funil: pipeline → reuniões qualif. → vendas → faturamento (taxa de cada etapa no subtítulo)
   document.getElementById('cKpiCloser').innerHTML = `<div class="kpi-row">
     ${kUno('Negócios criados', cN(k.criados), 'leads no pipeline', M('criados'))}
     ${kUno('Reuniões Qualif.', cN(k.reunioes_qualificadas), `${cPct(k.conv_rq_venda)} viraram venda`, M('reunioes_qualificadas'))}
     ${kUno('Vendas', cN(k.ganhos), `win rate ${cPct(k.win_rate)}`, M('ganhos'))}
-    ${kUno('Faturamento', cR$(k.faturamento), `ticket ${cR$(k.ticket)}`, M('faturamento'))}
+    ${kUno('Faturamento', cR$(k.faturamento), `ticket ${cR$(k.ticket)}`, M('faturamento', false, cR$))}
   </div>`;
 }
 

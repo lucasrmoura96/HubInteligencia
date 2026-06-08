@@ -12,6 +12,7 @@ const STATE = {
   tipoCurso: 'all',         // all | mba | pos | imersoes
   cursos: [],               // multi-select de cursos específicos; vazio = todos
   visaoOrigem: false,       // false = data do evento (padrão); true = data de conversão de origem
+  mqlView: 'diario',        // 'diario' (dia a dia) | 'mensal' (todos os meses do ano filtrado)
   selecao: null,
   busca: { ranking: '', tabela: '', cursos: '' },
   sortTabela: { col: 'leads', dir: 'desc' },
@@ -1245,17 +1246,24 @@ function yoyLabel() {
   return mesEmCurso ? 'YoY parc.' : 'YoY';
 }
 
-function yoyBadge(atual, anterior, inverted = false) {
+function yoyBadge(atual, anterior, inverted = false, fmt = fmtN) {
   if (anterior == null || atual == null) return '';
   if (anterior === 0) return '';
   const diff = ((atual - anterior) / anterior) * 100;
   const abs = Math.abs(diff);
   const labelTxt = yoyLabel() || 'YoY';
-  if (abs < 0.05) return `<span class="kpi-yoy flat">— ${labelTxt}</span>`;
+  const vol = cmpVolHtml(atual, anterior, fmt);
+  if (abs < 0.05) return `<span class="kpi-yoy flat"><span class="km-pct">— ${labelTxt}</span>${vol}</span>`;
   let dir = diff > 0 ? 'up' : 'down';
   if (inverted) dir = (dir === 'up') ? 'down' : 'up';
   const arrow = diff > 0 ? '↑' : '↓';
-  return `<span class="kpi-yoy ${dir}">${arrow} ${abs.toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1})}% ${labelTxt}</span>`;
+  return `<span class="kpi-yoy ${dir}"><span class="km-pct">${arrow} ${abs.toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1})}% ${labelTxt}</span>${vol}</span>`;
+}
+
+// Volume que a % representa: o valor do período anterior (base). Ao lado da %.
+function cmpVolHtml(atual, anterior, fmt) {
+  const f = fmt || fmtN;
+  return `<span class="km-vol">de ${f(anterior)}</span>`;
 }
 
 // ============================================================
@@ -1364,17 +1372,18 @@ function renderHealthWidget() {
 
 // Calcula variação % e retorna HTML do badge MoM
 // inverted=true → menor é melhor (custos)
-function momBadge(atual, anterior, inverted = false) {
+function momBadge(atual, anterior, inverted = false, fmt = fmtN) {
   if (anterior == null || atual == null) return '';
   if (anterior === 0) return '';
   const diff = ((atual - anterior) / anterior) * 100;
   const abs = Math.abs(diff);
   const labelTxt = momLabel() || 'MoM';
-  if (abs < 0.05) return `<span class="kpi-yoy flat">— ${labelTxt}</span>`;
+  const vol = cmpVolHtml(atual, anterior, fmt);
+  if (abs < 0.05) return `<span class="kpi-yoy flat"><span class="km-pct">— ${labelTxt}</span>${vol}</span>`;
   let dir = diff > 0 ? 'up' : 'down';
   if (inverted) dir = (dir === 'up') ? 'down' : 'up';
   const arrow = diff > 0 ? '↑' : '↓';
-  return `<span class="kpi-yoy ${dir}">${arrow} ${abs.toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1})}% ${labelTxt}</span>`;
+  return `<span class="kpi-yoy ${dir}"><span class="km-pct">${arrow} ${abs.toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1})}% ${labelTxt}</span>${vol}</span>`;
 }
 
 function calcKpisSelecao() {
@@ -1441,12 +1450,12 @@ function renderKPIs() {
   const kAAY = calcKpisAnoAnterior();     // YoY
 
   // Helper de comparativos: MoM + YoY centralizado abaixo do valor
-  const cmp = (atualMoM, momVal, atualYoY, yoyVal, inverted = false) => {
+  const cmp = (atualMoM, momVal, atualYoY, yoyVal, inverted = false, fmt = fmtN) => {
     // Sem contexto temporal (filtro = "Tudo", cross-filter ou tipo) → não mostra badges
     // Evita o ruído visual de 12 cards exibindo "— sem comparativo".
     if (!kAA && !kAAY) return '';
-    const m = kAA  ? momBadge(atualMoM, momVal, inverted) : '';
-    const y = kAAY ? yoyBadge(atualYoY, yoyVal, inverted) : '';
+    const m = kAA  ? momBadge(atualMoM, momVal, inverted, fmt) : '';
+    const y = kAAY ? yoyBadge(atualYoY, yoyVal, inverted, fmt) : '';
     if (m || y) return `<span class="kpi-cmp">${m}${y}</span>`;
     // Placeholder discreto para manter altura consistente quando há contexto mas valor=null
     return `<span class="kpi-cmp"><span class="kpi-yoy flat">— sem comparativo</span></span>`;
@@ -1511,7 +1520,7 @@ function renderKPIs() {
     <div class="kpi-cell">
       <span class="kpi-label">CPR</span>
       <span class="kpi-value t-num">${fmtR$2(k.cpr)}</span>
-      ${cmp(k.cpr, kAA && kAA.cpr, k.cpr, kAAY && kAAY.cpr, true)}
+      ${cmp(k.cpr, kAA && kAA.cpr, k.cpr, kAAY && kAAY.cpr, true, fmtR$2)}
       <span class="kpi-sub">custo por reunião quali.</span>
     </div>
   ` : `
@@ -1526,19 +1535,19 @@ function renderKPIs() {
     <div class="kpi-cell">
       <span class="kpi-label">Investimento</span>
       <span class="kpi-value t-num">${fmtR$2(k.custo)}</span>
-      ${cmp(k.custo, kAA && kAA.custo, k.custo, kAAY && kAAY.custo, true)}
+      ${cmp(k.custo, kAA && kAA.custo, k.custo, kAAY && kAAY.custo, true, fmtR$2)}
       <span class="kpi-sub">total no período</span>
     </div>
     <div class="kpi-cell">
       <span class="kpi-label">CPL</span>
       <span class="kpi-value t-num">${fmtR$2(k.cpl)}</span>
-      ${cmp(k.cpl, kAA && kAA.cpl, k.cpl, kAAY && kAAY.cpl, true)}
+      ${cmp(k.cpl, kAA && kAA.cpl, k.cpl, kAAY && kAAY.cpl, true, fmtR$2)}
       <span class="kpi-sub">custo por lead</span>
     </div>
     <div class="kpi-cell">
       <span class="kpi-label">CPMQL</span>
       <span class="kpi-value t-num">${fmtR$2(k.cpmql)}</span>
-      ${cmp(k.cpmql, kAA && kAA.cpmql, k.cpmql, kAAY && kAAY.cpmql, true)}
+      ${cmp(k.cpmql, kAA && kAA.cpmql, k.cpmql, kAAY && kAAY.cpmql, true, fmtR$2)}
       <span class="kpi-sub">custo por MQL</span>
     </div>
     ${isFundo ? cprCard : ''}
@@ -1550,25 +1559,25 @@ function renderKPIs() {
         <div class="kpi-cell featured-positive">
           <span class="kpi-label">ROAS <span class="kpi-tag">VENDA</span></span>
           <span class="kpi-value">${fmtMult(k.roas)}</span>
-          ${cmp(k.roas, kAA && kAA.roas, k.roas, kAAY && kAAY.roas)}
+          ${cmp(k.roas, kAA && kAA.roas, k.roas, kAAY && kAAY.roas, false, fmtMult)}
           <span class="kpi-sub">receita ÷ custo Fundo</span>
         </div>
         <div class="kpi-cell">
           <span class="kpi-label">Faturamento</span>
           <span class="kpi-value t-num">${fmtR$2(k.faturamento)}</span>
-          ${cmp(k.faturamento, kAA && kAA.faturamento, k.faturamento, kAAY && kAAY.faturamento)}
+          ${cmp(k.faturamento, kAA && kAA.faturamento, k.faturamento, kAAY && kAAY.faturamento, false, fmtR$2)}
           <span class="kpi-sub">${fmtN(k.ganhos)} vendas</span>
         </div>
         <div class="kpi-cell">
           <span class="kpi-label">CPA</span>
           <span class="kpi-value t-num">${fmtR$2(k.cac)}</span>
-          ${cmp(k.cac, kAA && kAA.cac, k.cac, kAAY && kAAY.cac, true)}
+          ${cmp(k.cac, kAA && kAA.cac, k.cac, kAAY && kAAY.cac, true, fmtR$2)}
           <span class="kpi-sub">custo por aquisição</span>
         </div>
         <div class="kpi-cell">
           <span class="kpi-label">Ticket médio</span>
           <span class="kpi-value t-num">${fmtR$2(k.ticket_medio)}</span>
-          ${cmp(k.ticket_medio, kAA && kAA.ticket_medio, k.ticket_medio, kAAY && kAAY.ticket_medio)}
+          ${cmp(k.ticket_medio, kAA && kAA.ticket_medio, k.ticket_medio, kAAY && kAAY.ticket_medio, false, fmtR$2)}
           <span class="kpi-sub">por negócio</span>
         </div>
       `;
@@ -1577,13 +1586,13 @@ function renderKPIs() {
         <div class="kpi-cell featured-accent">
           <span class="kpi-label">ROAS <span class="kpi-tag">INFLUÊNCIA</span></span>
           <span class="kpi-value">${fmtMult(k.roas)}</span>
-          ${cmp(k.roas, kAA && kAA.roas, k.roas, kAAY && kAAY.roas)}
+          ${cmp(k.roas, kAA && kAA.roas, k.roas, kAAY && kAAY.roas, false, fmtMult)}
           <span class="kpi-sub">influenciado ÷ custo Topo</span>
         </div>
         <div class="kpi-cell">
           <span class="kpi-label">Faturamento influenciado</span>
           <span class="kpi-value t-num">${fmtR$2(k.faturamento)}</span>
-          ${cmp(k.faturamento, kAA && kAA.faturamento, k.faturamento, kAAY && kAAY.faturamento)}
+          ${cmp(k.faturamento, kAA && kAA.faturamento, k.faturamento, kAAY && kAAY.faturamento, false, fmtR$2)}
           <span class="kpi-sub">não-exclusivo</span>
         </div>
         <div class="kpi-cell">
@@ -1595,7 +1604,7 @@ function renderKPIs() {
         <div class="kpi-cell">
           <span class="kpi-label">Ticket médio</span>
           <span class="kpi-value t-num">${fmtR$2(k.ticket_medio)}</span>
-          ${cmp(k.ticket_medio, kAA && kAA.ticket_medio, k.ticket_medio, kAAY && kAAY.ticket_medio)}
+          ${cmp(k.ticket_medio, kAA && kAA.ticket_medio, k.ticket_medio, kAAY && kAAY.ticket_medio, false, fmtR$2)}
           <span class="kpi-sub">por venda assistida</span>
         </div>
       `;
@@ -1913,11 +1922,45 @@ function getDiarioFiltrado() {
   return linhas;
 }
 
+// Agrega a série por MÊS, respeitando o ANO filtrado (ignora mês/dia) + curso + tipo.
+// Mostra todos os meses do ano que têm dado (anos completos = 12 meses; ano corrente = até o mês atual).
+// Retorna [{ym:'YYYY-MM', leads, mqls}] ordenado.
+function getMensalFiltrado() {
+  const tab = STATE.data[STATE.tab];
+  const temCurso = STATE.cursos && STATE.cursos.length;
+  const temTipo = STATE.tipoCurso !== 'all';
+  const anoF = STATE.filtro.ano;
+  const anoOk = (dataIso) => anoF === 'all' || dataIso.slice(0, 4) === String(anoF);
+  const acc = new Map();
+  const add = (dataIso, leads, mqls) => {
+    const ym = dataIso.slice(0, 7);
+    let A = acc.get(ym); if (!A) { A = { leads: 0, mqls: 0 }; acc.set(ym, A); }
+    A.leads += leads || 0; A.mqls += mqls || 0;
+  };
+  if (temCurso || temTipo) {
+    for (const r of (tab.por_curso_diario || [])) {
+      if (!cursoAtivo(r.curso)) continue;
+      if (!cursoMatchTipo(r.curso, STATE.tipoCurso)) continue;
+      if (!anoOk(r.data)) continue;
+      add(r.data, r.leads, r.mqls);
+    }
+  } else {
+    for (const d of (tab.diario || [])) {
+      if (!anoOk(d.data)) continue;
+      add(d.data, d.leads, d.mqls);
+    }
+  }
+  const linhas = Array.from(acc, ([ym, v]) => ({ ym, leads: v.leads, mqls: v.mqls }));
+  linhas.sort((a, b) => (a.ym < b.ym ? -1 : a.ym > b.ym ? 1 : 0));
+  return linhas;
+}
+
 function renderMqlDiario() {
   const canvas = document.getElementById('chartMqlDiario');
   if (!canvas) return;
 
-  const linhas = getDiarioFiltrado();
+  const isMensal = STATE.mqlView === 'mensal';
+  const linhas = isMensal ? getMensalFiltrado() : getDiarioFiltrado();
   const inner = document.getElementById('mqlDiarioInner');
   const scroll = document.getElementById('mqlDiarioScroll');
 
@@ -1926,14 +1969,20 @@ function renderMqlDiario() {
   const colorBar  = isFundo ? theme.brand : theme.accent;
   const colorLine = theme.sand;
 
-  const labels = linhas.map(l => { const [, m, d] = l.data.split('-'); return `${d}/${m}`; });
+  // Rótulo de cada barra: mês ("Jan/25") na visão mensal; "dd/mm" na diária.
+  const labels = linhas.map(l => {
+    if (isMensal) {
+      const [y, m] = l.ym.split('-');
+      return `${MESES_NOMES[parseInt(m, 10) - 1]}/${y.slice(2)}`;
+    }
+    const [, m, d] = l.data.split('-'); return `${d}/${m}`;
+  });
   const mqls = linhas.map(l => l.mqls);
   const pct  = linhas.map(l => (l.leads ? Number((l.mqls / l.leads * 100).toFixed(1)) : 0));
 
-  // Mostra os rótulos de % na linha quando há espaço (<=120 dias).
-  // Com labels, dá mais largura por dia (30px) pra não sobrepor.
-  const mostrarLabels = linhas.length <= 120;
-  const perDay = mostrarLabels ? 30 : 16;
+  // Rótulos de % na linha: sempre na visão mensal (poucos pontos); na diária só com espaço (<=120 dias).
+  const mostrarLabels = isMensal || linhas.length <= 120;
+  const perDay = isMensal ? 70 : (mostrarLabels ? 30 : 16);
   const minW = Math.max(linhas.length * perDay, 600);
   if (inner) inner.style.minWidth = minW + 'px';
 
@@ -1988,9 +2037,16 @@ function renderMqlDiario() {
     const l = linhas[idx];
     if (!l) { el.style.opacity = '0'; return; }
     const p = l.leads ? (l.mqls / l.leads * 100) : 0;
-    const [y, m, d] = l.data.split('-');
+    let tituloTip;
+    if (isMensal) {
+      const [y, m] = l.ym.split('-');
+      tituloTip = `${MESES_NOMES[parseInt(m, 10) - 1]}/${y}`;
+    } else {
+      const [y, m, d] = l.data.split('-');
+      tituloTip = `${d}/${m}/${y}`;
+    }
     el.innerHTML = `
-      <div class="mqt-title">${d}/${m}/${y}</div>
+      <div class="mqt-title">${tituloTip}</div>
       <div class="mqt-row mqt-pct"><span>%MQL</span><b>${fmtPct(p)}</b></div>
       <div class="mqt-row" style="color:${colorLine}"><span>Leads</span><b>${fmtN(l.leads)}</b></div>
       <div class="mqt-row" style="color:${colorBar}"><span>MQLs</span><b>${fmtN(l.mqls)}</b></div>
@@ -2026,7 +2082,7 @@ function renderMqlDiario() {
         x: {
           grid: { display: false }, border: { display: false },
           ticks: { color: theme.text, font: { family: 'JetBrains Mono, monospace', size: 14, weight: 500 },
-                   maxRotation: 90, minRotation: 60, autoSkip: linhas.length > 62 },
+                   maxRotation: isMensal ? 0 : 90, minRotation: isMensal ? 0 : 60, autoSkip: !isMensal && linhas.length > 62 },
         },
         y: {
           position: 'left', beginAtZero: true,
@@ -2044,8 +2100,8 @@ function renderMqlDiario() {
     },
   });
 
-  // Auto-scroll pro fim (dias mais recentes) quando há muitos dias
-  if (scroll && linhas.length > 31) {
+  // Auto-scroll pro fim (períodos mais recentes) quando há muitas barras
+  if (scroll && !isMensal && linhas.length > 31) {
     requestAnimationFrame(() => { scroll.scrollLeft = scroll.scrollWidth; });
   }
 
@@ -2053,10 +2109,16 @@ function renderMqlDiario() {
   const totalMqls = mqls.reduce((a, b) => a + b, 0);
   const totalLeads = linhas.reduce((a, l) => a + l.leads, 0);
   const pctGeral = totalLeads ? (totalMqls / totalLeads * 100) : 0;
+  const unidade = isMensal ? (linhas.length === 1 ? 'mês' : 'meses') : 'dias';
+  // No modo mensal o gráfico ignora o mês/dia e mostra o ANO inteiro → hint reflete o ano (não "Jun").
+  const ctxLabel = isMensal
+    ? (STATE.filtro.ano === 'all' ? 'todos os anos' : `Ano ${STATE.filtro.ano}`)
+    : labelPeriodoAtual();
   const hint = document.getElementById('mqlDiarioHint');
-  if (hint) hint.textContent = `${linhas.length} dias · ${fmtN(totalMqls)} MQLs · ${fmtPct(pctGeral)} médio · ${labelPeriodoAtual()}`;
+  if (hint) hint.textContent = `${linhas.length} ${unidade} · ${fmtN(totalMqls)} MQLs · ${fmtPct(pctGeral)} médio · ${ctxLabel}`;
   const titulo = document.getElementById('mqlDiarioTitle');
-  if (titulo) titulo.textContent = isFundo ? 'MQLs por dia · Fundo' : 'MQLs por dia · Topo';
+  const base = isMensal ? 'MQLs por mês' : 'MQLs por dia';
+  if (titulo) titulo.textContent = isFundo ? `${base} · Fundo` : `${base} · Topo`;
 }
 
 function renderFontes() {
@@ -3099,9 +3161,9 @@ function renderEmptyStateBanner() {
 function renderCanaisPagos() {
   const wrap = document.getElementById('canaisPagos');
   if (!wrap) return;
-  if (STATE.selecao || STATE.tipoCurso !== 'all') {
-    // Em cross-filter ou tipo, esconde
-    wrap.innerHTML = `<div class="canais-head"><h3>Canais Pagos</h3><span class="hint">— ajuste o filtro —</span></div><div class="empty-small">Disponível sem cross-filter ou filtro de tipo</div>`;
+  if (STATE.selecao) {
+    // Em cross-filter (clique em curso/fonte), esconde
+    wrap.innerHTML = `<div class="canais-head"><h3>Canais Pagos</h3><span class="hint">— ajuste o filtro —</span></div><div class="empty-small">Disponível sem cross-filter</div>`;
     return;
   }
 
@@ -3109,14 +3171,27 @@ function renderCanaisPagos() {
 
   // Decide se usa dados filtrados (mensal) ou globais (sempre filtra via helpers)
   let porFonteAgregado = [];
-  const meses = (tab.por_fonte_mensal || []).filter(m => tupleAtivo(m.ano, m.mes));
   const acc = {};
-  meses.forEach(m => (m.fontes || []).forEach(f => {
-    if (!acc[f.fonte]) acc[f.fonte] = { label: f.fonte, leads: 0, mqls: 0, custo: 0 };
-    acc[f.fonte].leads += f.leads;
-    acc[f.fonte].mqls  += f.mqls;
-    acc[f.fonte].custo += f.custo;
-  }));
+  if (STATE.tipoCurso !== 'all') {
+    // Com filtro de TIPO: agrega fonte×curso via campanhas (mesma fonte do funil),
+    // incluindo a campanha cujo curso casa o tipo selecionado.
+    getTodasCampanhasFiltradas()
+      .filter(c => (c.cursos || []).some(cu => cursoMatchTipo(cu, STATE.tipoCurso)))
+      .forEach(c => (c.fontes || []).forEach(f => {
+        if (!acc[f.fonte]) acc[f.fonte] = { label: f.fonte, leads: 0, mqls: 0, custo: 0 };
+        acc[f.fonte].leads += f.leads || 0;
+        acc[f.fonte].mqls  += f.mqls  || 0;
+        acc[f.fonte].custo += f.custo || 0;
+      }));
+  } else {
+    const meses = (tab.por_fonte_mensal || []).filter(m => tupleAtivo(m.ano, m.mes));
+    meses.forEach(m => (m.fontes || []).forEach(f => {
+      if (!acc[f.fonte]) acc[f.fonte] = { label: f.fonte, leads: 0, mqls: 0, custo: 0 };
+      acc[f.fonte].leads += f.leads;
+      acc[f.fonte].mqls  += f.mqls;
+      acc[f.fonte].custo += f.custo;
+    }));
+  }
   porFonteAgregado = Object.values(acc);
 
   const findFonte = (key) => porFonteAgregado.find(p => p.label.toLowerCase().includes(key));
@@ -3246,21 +3321,34 @@ function renderCanalDrawer() {
 
   const tab = STATE.data[STATE.tab];
 
-  // Coleta campanhas do canal RESPEITANDO filtro de data via campanhas_por_fonte_mensal
-  const meses = (tab.campanhas_por_fonte_mensal || [])
-    .filter(m => tupleAtivo(m.ano, m.mes));
-
-  // Agrega por nome de campanha
+  // Agrega por nome de campanha (do canal), respeitando filtro de data.
   const acc = {};
-  meses.forEach(mObj => {
-    const campsDaFonte = (mObj.por_fonte || {})[fonteNome] || [];
-    campsDaFonte.forEach(c => {
-      if (!acc[c.campanha]) acc[c.campanha] = { campanha: c.campanha, leads: 0, mqls: 0, custo: 0 };
-      acc[c.campanha].leads += c.leads;
-      acc[c.campanha].mqls  += c.mqls;
-      acc[c.campanha].custo += c.custo;
+  if (STATE.tipoCurso !== 'all') {
+    // Com filtro de TIPO: usa as campanhas já filtradas por tipo e pega a fatia desta fonte.
+    getTodasCampanhasFiltradas()
+      .filter(c => (c.cursos || []).some(cu => cursoMatchTipo(cu, STATE.tipoCurso)))
+      .forEach(c => {
+        const f = (c.fontes || []).find(x => x.fonte === fonteNome);
+        if (!f) return;
+        if (!acc[c.campanha]) acc[c.campanha] = { campanha: c.campanha, leads: 0, mqls: 0, custo: 0 };
+        acc[c.campanha].leads += f.leads || 0;
+        acc[c.campanha].mqls  += f.mqls  || 0;
+        acc[c.campanha].custo += f.custo || 0;
+      });
+  } else {
+    // Sem tipo: coleta via campanhas_por_fonte_mensal (rápido)
+    const meses = (tab.campanhas_por_fonte_mensal || [])
+      .filter(m => tupleAtivo(m.ano, m.mes));
+    meses.forEach(mObj => {
+      const campsDaFonte = (mObj.por_fonte || {})[fonteNome] || [];
+      campsDaFonte.forEach(c => {
+        if (!acc[c.campanha]) acc[c.campanha] = { campanha: c.campanha, leads: 0, mqls: 0, custo: 0 };
+        acc[c.campanha].leads += c.leads;
+        acc[c.campanha].mqls  += c.mqls;
+        acc[c.campanha].custo += c.custo;
+      });
     });
-  });
+  }
   const campanhas = Object.values(acc).map(c => ({
     ...c,
     pct_mql: c.leads ? (c.mqls / c.leads * 100) : 0,
@@ -3376,6 +3464,18 @@ function setupCanalDrawer() {
   (function tickerToggle() {
     const tk = document.getElementById('mktTicker'); if (!tk) return;
     tk.addEventListener('click', (e) => { if (e.target.closest('.tk-panel')) return; tk.classList.toggle('expanded'); });
+  })();
+
+  // Toggle Diário / Mensal no gráfico de MQLs
+  (function mqlViewToggle() {
+    const seg = document.getElementById('mqlViewSeg'); if (!seg) return;
+    seg.addEventListener('click', (e) => {
+      const btn = e.target.closest('.vs-btn'); if (!btn) return;
+      const v = btn.dataset.view; if (v === STATE.mqlView) return;
+      STATE.mqlView = v;
+      seg.querySelectorAll('.vs-btn').forEach(b => b.classList.toggle('active', b.dataset.view === v));
+      renderMqlDiario();
+    });
   })();
 
   renderAll();
