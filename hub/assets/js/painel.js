@@ -340,7 +340,7 @@ async function loadData() {
 
 function renderHeader() {
   const upd = new Date(STATE.data.meta.atualizado_em);
-  let txt = upd.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+  let txt = 'Atualizado em ' + upd.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
   // Aviso quando data_referencia (última data presente no RD) está defasada vs hoje real
   // Detecta dados desatualizados sem precisar de monitoramento externo.

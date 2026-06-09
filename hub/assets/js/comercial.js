@@ -1278,7 +1278,16 @@ function setupFiltrosC() {
   }
   try { CS.data = await HubAuth.unlock({ key:'comercial', varName:'PAINEL_ENC_COMERCIAL', nome:'Comercial' }); }
   catch (e) { console.error(e); return; }
-  document.getElementById('cHint').textContent = CS.data.meta && CS.data.meta.data_referencia ? ('Dados até ' + CS.data.meta.data_referencia) : '';
+  // Data de atualização no MESMO formato da home/MKT: "Atualizado em DD/MM/AAAA, HH:MM".
+  (function setHintAtualizado() {
+    const el = document.getElementById('cHint'); if (!el) return;
+    const m = CS.data.meta || {};
+    if (m.atualizado_em) {
+      el.textContent = 'Atualizado em ' + new Date(m.atualizado_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+    } else if (m.data_referencia) {
+      el.textContent = 'Atualizado em ' + new Date(m.data_referencia + 'T00:00:00').toLocaleDateString('pt-BR');
+    } else { el.textContent = ''; }
+  })();
   setupFiltrosC();
   setupTabsC();
 
