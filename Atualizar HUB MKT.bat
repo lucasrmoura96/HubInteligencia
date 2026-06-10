@@ -51,6 +51,52 @@ if errorlevel 1 (
 )
 
 REM ============================================================
+REM  [2.3/4] Pipeline COMERCIAL (Negocios + Atividades)
+REM ============================================================
+echo.
+echo   [2.3]  Processando base comercial (funil + times)
+echo.
+python scripts\comercial_pipeline.py
+if errorlevel 1 (
+    echo   [X] ERRO no pipeline comercial. Verifique a mensagem acima.
+    pause
+    exit /b 1
+)
+
+REM ============================================================
+REM  [2.5/4] Cifragem por area (AES-256-GCM) -> *_enc.js
+REM  So o arquivo cifrado vai pro deploy. Texto puro fica local.
+REM ============================================================
+echo.
+echo   [2.5]  Cifrando dados por area (seguranca)
+echo.
+python scripts\cifrar_areas.py
+if errorlevel 1 (
+    echo.
+    echo  ============================================================
+    echo   [X] ERRO na cifragem. Verifique:
+    echo     - senhas.local.json existe e tem as senhas das areas?
+    echo     - lib instalada?  pip install cryptography
+    echo  ============================================================
+    pause
+    exit /b 1
+)
+
+REM ============================================================
+REM  [2.7/4] Cache-busting: versiona CSS/JS/dados nos HTMLs (?v=hash)
+REM  Garante que o navegador pegue a versao nova sem hard-refresh.
+REM ============================================================
+echo.
+echo   [2.7]  Cache-busting (versionando assets nos HTMLs)
+echo.
+python scripts\aplicar_versao.py
+if errorlevel 1 (
+    echo   [X] ERRO ao versionar assets. Verifique a mensagem acima.
+    pause
+    exit /b 1
+)
+
+REM ============================================================
 REM  [3/4] Delta vs ultimo deploy
 REM ============================================================
 echo.
@@ -72,7 +118,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-git add hub/ scripts/ .gitignore *.md 2>nul
+git add hub/ scripts/ cloudflare-worker/ .gitignore *.md 2>nul
 
 git diff --cached --quiet
 if errorlevel 1 (
