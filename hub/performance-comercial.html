@@ -92,12 +92,14 @@
 
     <!-- Filtro de TIPO de produto (afeta Closer 100%; SDR exceto MQLs) -->
     <div class="filter-type">
-      <span class="ft-label">Tipo</span>
-      <div class="ft-buttons">
-        <button class="ft-btn active" data-tipo="all">Tudo</button>
-        <button class="ft-btn" data-tipo="mba">MBA</button>
-        <button class="ft-btn" data-tipo="pos">Pós</button>
-        <button class="ft-btn" data-tipo="imersoes">Imersões</button>
+      <div class="ft-center">
+        <span class="ft-label">Tipo</span>
+        <div class="ft-buttons">
+          <button class="ft-btn active" data-tipo="all">Tudo</button>
+          <button class="ft-btn" data-tipo="mba">MBA</button>
+          <button class="ft-btn" data-tipo="pos">Pós</button>
+          <button class="ft-btn" data-tipo="imersoes">Imersões</button>
+        </div>
       </div>
       <div class="ft-recorte" id="cRecorte"></div>
     </div>
@@ -172,7 +174,7 @@
         <div class="section-head">
           <div class="sec-left"><h2>Vendas · Closer × Dia <small style="font-weight:400;color:var(--text-soft)">(hover = faturamento)</small></h2></div>
           <div style="display:inline-flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-            <select id="cSelCursoVenda" class="sel-inline" aria-label="Curso"></select>
+            <div id="cSelCursoVenda" class="ss-mount" aria-label="Curso"></div>
             <select id="cSelCloser" class="sel-inline" aria-label="Closer"></select>
           </div>
         </div>
@@ -180,7 +182,7 @@
       </section>
 
       <section class="section">
-        <div class="section-head"><div class="sec-left"><h2>Reuniões e Vendas por Curso</h2></div><select id="cSelCurso" class="sel-inline" aria-label="Curso"></select></div>
+        <div class="section-head"><div class="sec-left"><h2>Reuniões e Vendas por Curso</h2></div><div id="cSelCurso" class="ss-mount" aria-label="Curso"></div></div>
         <div class="rank-table-wrap" id="cCloserCurso"></div>
       </section>
 

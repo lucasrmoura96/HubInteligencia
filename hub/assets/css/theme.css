@@ -816,12 +816,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 }
 .filters-sticky .filter-bar { margin-bottom: var(--space-2); }
 .filters-sticky .filter-type { margin-bottom: 0; }
-/* Recorte por pessoa/produto — à direita da linha de Tipo.
-   .filter-type pode quebrar como bloco; mas os selects Closer + Curso
-   ficam SEMPRE lado a lado (nowrap), nunca empilhados. */
-.filters-sticky .filter-type { flex-wrap: wrap; max-width: none; width: 100%; }
-.filter-type .ft-recorte { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
-.filter-type .ft-recorte .sel-inline { min-width: 150px; max-width: 210px; }
+/* (Layout do Tipo centralizado + recorte à direita está em ".filter-type" / ".ft-center" / ".ft-recorte" mais abaixo.) */
 .filters-sticky.is-stuck { box-shadow: 0 10px 22px -16px rgba(0,0,0,0.5); }
 
 /* Chips do filtro ativo — resumo sempre visível do recorte (remover c/ 1 clique) */
@@ -956,6 +951,27 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+/* Busca dentro do dropdown (filtra opções em tempo real) */
+.ms-search {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 9px; margin: 2px 2px 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+.ms-search svg { flex: 0 0 auto; opacity: 0.7; }
+.ms-search-input {
+  flex: 1 1 auto; min-width: 0;
+  border: 0; background: transparent; outline: none;
+  font-family: var(--font-mono); font-size: 0.82rem; color: var(--text);
+}
+.ms-search-input::placeholder { color: var(--text-muted); opacity: 0.8; }
+.ms-empty {
+  padding: 14px 10px; text-align: center;
+  font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);
+}
+
 .ms-actions {
   display: flex; gap: 4px;
   padding: 6px 6px 8px;
@@ -1004,6 +1020,25 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
   flex-shrink: 0;
 }
 .ms-item input[type=checkbox]:checked + span { font-weight: 600; }
+
+/* Single-select com busca (createSearchableSelectC) — linhas de opção sem checkbox */
+.ms-opt {
+  display: block;
+  padding: 7px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--t-fast);
+  user-select: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ms-opt:hover { background: var(--surface-2); }
+.ms-opt.sel { font-weight: 700; color: var(--brand-600, var(--brand-500)); background: var(--surface-2); }
+/* mount do single-select ocupa o espaço como um select inline */
+.ss-mount { display: inline-block; vertical-align: middle; }
+.ss-single .ms-btn { width: 100%; }
 
 /* ============================================================
    PRESET PERSONALIZADO (range customizado de datas)
@@ -1195,14 +1230,43 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 .btn-clear:hover { color: var(--negative); border-color: var(--negative); }
 
 /* ============================================================
-   FILTRO TIPO DE CURSO — centralizado, segmentado
+   FILTRO TIPO DE CURSO — Tipo CENTRALIZADO na página, recortes
+   (Curso/SDR/Closer/Data) logo à DIREITA. Padrão das 2 páginas.
+   Grid 3 colunas: [1fr] [Tipo auto] [1fr] → Tipo fica no centro,
+   recorte começa logo após o Tipo (col 3, alinhado ao início).
    ============================================================ */
+/* BASE (qualquer largura): empilhado e centralizado — robusto, NUNCA estoura
+   horizontalmente. Tipo centralizado e recorte logo abaixo, também centralizado.
+   Em telas largas (media abaixo) vira lado-a-lado. */
 .filter-type {
-  display: flex; justify-content: center; align-items: center;
-  gap: var(--space-3);
+  display: flex; flex-direction: column; align-items: center;
+  gap: var(--space-2);
   margin: 0 auto var(--space-5);
   padding: var(--space-2) var(--space-3);
-  max-width: 700px;
+  width: 100%;
+}
+.filter-type .ft-center {
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  flex-wrap: wrap; justify-content: center;
+}
+.filter-type .ft-recorte {
+  display: inline-flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; justify-content: center; max-width: 100%;
+}
+.filter-type .ft-recorte .sel-inline { min-width: 120px; max-width: 168px; }
+/* Curso (multiselect) no recorte: valor mais curto p/ caber ao lado do Tipo */
+.filter-type .ft-recorte .ms-wide .ms-value { max-width: 150px; }
+
+/* TELAS LARGAS (≥1300px): Tipo CENTRALIZADO na página + recorte logo à DIREITA,
+   na mesma linha. Grid [1fr][Tipo][1fr] mantém o Tipo no centro exato. */
+@media (min-width: 1300px) {
+  .filter-type {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center; column-gap: var(--space-3);
+  }
+  .filter-type .ft-center { grid-column: 2; justify-self: center; }
+  .filter-type .ft-recorte { grid-column: 3; justify-self: start; flex-wrap: nowrap; }
 }
 .filter-type .ft-label {
   font-family: var(--font-display);
@@ -1250,9 +1314,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 }
 .filter-type .ft-btn.active::before { opacity: 1; transform: scale(1); }
 .filter-type .ft-btn:focus-visible { outline: 0; box-shadow: 0 0 0 4px rgba(31, 181, 65, 0.2); }
-@media (max-width: 560px) {
-  .filter-type { flex-direction: column; gap: var(--space-2); }
-}
+/* (Telas estreitas usam o layout BASE empilhado definido acima — sem override.) */
 
 /* ============================================================
    TOGGLE DE VISÃO TEMPORAL (evento × origem) — minimalista
@@ -2262,6 +2324,46 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
   box-shadow: 0 3px 10px rgba(31, 181, 65, 0.25);
 }
 .view-seg .vs-btn:focus-visible { outline: 0; box-shadow: 0 0 0 4px rgba(31, 181, 65, 0.2); }
+
+/* Slider de mínimo de leads do ranking (Top/Bottom) */
+.rank-controls {
+  display: flex; align-items: center; gap: 14px;
+  margin: 2px 0 var(--space-4);
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.rank-controls .rc-label {
+  font-family: var(--font-display); font-size: 0.7rem; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted);
+  white-space: nowrap;
+}
+.rank-controls .rc-slider {
+  flex: 1 1 auto; min-width: 120px; max-width: 460px;
+  -webkit-appearance: none; appearance: none;
+  height: 6px; border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--brand-500), var(--brand-300, #7fd99a));
+  background-color: var(--border);
+  cursor: pointer;
+}
+.rank-controls .rc-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; border: 3px solid var(--brand-500);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.18); cursor: pointer;
+}
+.rank-controls .rc-slider::-moz-range-thumb {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; border: 3px solid var(--brand-500);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.18); cursor: pointer;
+}
+.rank-controls .rc-slider:focus-visible { outline: 0; box-shadow: 0 0 0 4px rgba(31,181,65,0.2); }
+.rank-controls .rc-value {
+  font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-soft); white-space: nowrap;
+}
+.rank-controls .rc-value b { color: var(--brand-600, var(--brand-500)); font-weight: 700; }
+
 /* Espaçamento extra entre badges (MoM + YoY) */
 .kpi-yoy + .kpi-yoy { margin-left: 4px; }
 .kpi-yoy.up   { color: var(--positive); background: var(--positive-soft); }

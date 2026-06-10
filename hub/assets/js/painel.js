@@ -13,6 +13,7 @@ const STATE = {
   cursos: [],               // multi-select de cursos específicos; vazio = todos
   visaoOrigem: false,       // false = data do evento (padrão); true = data de conversão de origem
   mqlView: 'diario',        // 'diario' (dia a dia) | 'mensal' (todos os meses do ano filtrado)
+  minLeadsRanking: 100,     // mínimo de leads p/ uma campanha entrar no Top/Bottom (slider)
   selecao: null,
   busca: { ranking: '', tabela: '', cursos: '' },
   sortTabela: { col: 'leads', dir: 'desc' },
@@ -381,7 +382,7 @@ const MS_INSTANCES = {};
 // Factory de Multi-Select com checkboxes (Mês, Dia, Curso).
 // config = { mount: HTMLElement, label, options: [{value, text}], placeholder, onChange(arr) }
 function createMultiSelect(config) {
-  const { mount, label, options, placeholder = 'Todos', onChange } = config;
+  const { mount, label, options, placeholder = 'Todos', onChange, searchable = false } = config;
   mount.classList.add('ms-dropdown');
   mount.innerHTML = `
     <button type="button" class="ms-btn" aria-haspopup="listbox" aria-expanded="false">
@@ -390,6 +391,10 @@ function createMultiSelect(config) {
       <svg class="ms-caret" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
     </button>
     <div class="ms-panel" hidden>
+      ${searchable ? `<div class="ms-search">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" class="ms-search-input" placeholder="Buscar ${escapeHtml(label.toLowerCase())}..." aria-label="Buscar ${escapeHtml(label.toLowerCase())}" />
+      </div>` : ''}
       <div class="ms-actions">
         <button type="button" class="ms-action ms-all">Todos</button>
         <button type="button" class="ms-action ms-none">Limpar</button>
@@ -402,12 +407,16 @@ function createMultiSelect(config) {
           </label>
         `).join('')}
       </div>
+      ${searchable ? `<div class="ms-empty" hidden>Nenhum resultado</div>` : ''}
     </div>
   `;
   const btn = mount.querySelector('.ms-btn');
   const panel = mount.querySelector('.ms-panel');
   const valueEl = mount.querySelector('.ms-value');
   const inputs = mount.querySelectorAll('.ms-list input[type=checkbox]');
+  const searchInput = mount.querySelector('.ms-search-input');
+  const itemsEls = mount.querySelectorAll('.ms-item');
+  const emptyEl = mount.querySelector('.ms-empty');
 
   function selecionados() {
     return Array.from(inputs).filter(i => i.checked).map(i => i.value);
@@ -430,8 +439,29 @@ function createMultiSelect(config) {
     inputs.forEach(i => { i.checked = set.has(String(i.value)); });
     atualizaLabel();
   }
-  function abrir() { panel.hidden = false; btn.setAttribute('aria-expanded', 'true'); mount.classList.add('open'); }
+  function abrir() {
+    panel.hidden = false; btn.setAttribute('aria-expanded', 'true'); mount.classList.add('open');
+    if (searchInput) setTimeout(() => searchInput.focus(), 0);
+  }
   function fechar() { panel.hidden = true; btn.setAttribute('aria-expanded', 'false'); mount.classList.remove('open'); }
+
+  // Busca em tempo real (sem acento) — filtra as opções conforme o usuário digita
+  if (searchInput) {
+    const aplicarBusca = () => {
+      const q = normalize(searchInput.value.trim());
+      let visiveis = 0;
+      itemsEls.forEach(it => {
+        const ok = !q || normalize(it.textContent).includes(q);
+        it.style.display = ok ? '' : 'none';
+        if (ok) visiveis++;
+      });
+      if (emptyEl) emptyEl.hidden = visiveis > 0;
+    };
+    searchInput.addEventListener('input', aplicarBusca);
+    // digitar/clicar no campo não deve fechar o painel nem mexer nos checkboxes
+    searchInput.addEventListener('click', e => e.stopPropagation());
+    searchInput.addEventListener('keydown', e => e.stopPropagation());
+  }
 
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -531,6 +561,7 @@ function setupFiltros() {
       label: 'Curso',
       options: cursoOptions,
       placeholder: 'Todos os cursos',
+      searchable: true,
       onChange: (arr) => {
         STATE.cursos = arr;
         renderAll();
@@ -2407,13 +2438,15 @@ function getPorCursoRealFiltrado() {
 // Calcula Top 5 / Bottom 5 dinamicamente respeitando filtro de data
 function calcRankingFiltrado() {
   const tab = STATE.data[STATE.tab];
+  const MIN_LEADS = STATE.minLeadsRanking || 1;
 
   // Sem filtro temporal e sem curso → ranking pré-calculado do JSON
-  if (semFiltroTemporal()) {
+  // (só serve com o threshold PADRÃO de 100; com slider em outro valor, recalcula).
+  if (semFiltroTemporal() && MIN_LEADS === 100) {
     return tab.ranking_criativos;
   }
 
-  // Filtra campanhas_mensal pelos meses no recorte
+  // Filtra campanhas_mensal pelos meses no recorte (sem filtro temporal → todos os meses)
   const meses = (tab.campanhas_mensal || []).filter(m => tupleAtivo(m.ano, m.mes));
   if (!meses.length) return { top5: [], bottom5: [], total_campanhas_avaliadas: 0 };
 
@@ -2433,7 +2466,6 @@ function calcRankingFiltrado() {
     ...c,
     pct_mql: c.leads ? Number(((c.mqls / c.leads) * 100).toFixed(1)) : 0,
   }));
-  const MIN_LEADS = 100;
   if (STATE.tab === 'topo') {
     camps = camps.filter(c => c.leads >= MIN_LEADS);
   } else {
@@ -3464,6 +3496,19 @@ function setupCanalDrawer() {
   (function tickerToggle() {
     const tk = document.getElementById('mktTicker'); if (!tk) return;
     tk.addEventListener('click', (e) => { if (e.target.closest('.tk-panel')) return; tk.classList.toggle('expanded'); });
+  })();
+
+  // Slider: mínimo de leads p/ entrar no ranking Top/Bottom (recalcula só o ranking)
+  (function rankMinLeadsSlider() {
+    const sl = document.getElementById('rankMinLeads'); if (!sl) return;
+    const val = document.getElementById('rankMinLeadsVal');
+    sl.value = String(STATE.minLeadsRanking);
+    if (val) val.textContent = String(STATE.minLeadsRanking);
+    sl.addEventListener('input', () => {
+      STATE.minLeadsRanking = parseInt(sl.value, 10) || 1;
+      if (val) val.textContent = String(STATE.minLeadsRanking);
+      renderRanking();
+    });
   })();
 
   // Toggle Diário / Mensal no gráfico de MQLs

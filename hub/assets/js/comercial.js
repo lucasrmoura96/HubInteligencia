@@ -48,6 +48,8 @@ function sparkline(vals) {
 }
 const cssVarC = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const escC = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Normaliza p/ busca: minúsculas + sem acento
+const normC = (s) => String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 // filtro.mes/dia: 'all' OU Array<string>. filtro.range: {de,ate,deNum,ateNum} ou null
 const CS = { data: null, filtro: { ano: 'all', mes: 'all', dia: 'all', range: null }, closerSel: null,
@@ -157,6 +159,52 @@ function createMultiSelectC(config) {
   lbl();
   return { setValores };
 }
+
+// Single-select com BUSCA (para listas grandes, ex.: Curso). Substitui <select> nativo.
+// config: { mount, label, options:[{value,text}], value, placeholder, todosValue, onChange(value) }
+function createSearchableSelectC(config) {
+  const { mount, label, options, value = '', placeholder = 'Todos', todosValue = '', onChange } = config;
+  mount.classList.add('ms-dropdown', 'ss-single');
+  const findText = (v) => { const o = options.find(x => String(x.value) === String(v)); return o ? o.text : placeholder; };
+  let curVal = value;
+  const optsHtml = `<div class="ms-opt" data-value="${escC(todosValue)}">${escC(placeholder)}</div>` +
+    options.map(o => `<div class="ms-opt" data-value="${escC(o.value)}">${escC(o.text)}</div>`).join('');
+  mount.innerHTML = `
+    <button type="button" class="ms-btn"><span class="ms-value">${escC(findText(curVal))}</span>
+      <svg class="ms-caret" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+    <div class="ms-panel" hidden>
+      <div class="ms-search"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="text" class="ms-search-input" placeholder="Buscar ${escC(String(label).toLowerCase())}..." aria-label="Buscar ${escC(String(label).toLowerCase())}" /></div>
+      <div class="ms-list">${optsHtml}</div>
+      <div class="ms-empty" hidden>Nenhum resultado</div>
+    </div>`;
+  const btn = mount.querySelector('.ms-btn'), panel = mount.querySelector('.ms-panel'), valueEl = mount.querySelector('.ms-value');
+  const searchInput = mount.querySelector('.ms-search-input'), opts = mount.querySelectorAll('.ms-opt'), emptyEl = mount.querySelector('.ms-empty');
+  const markSel = () => opts.forEach(o => o.classList.toggle('sel', String(o.dataset.value) === String(curVal)));
+  markSel();
+  if (String(curVal) !== String(todosValue)) mount.classList.add('has-selection');
+  function abrir() {
+    document.querySelectorAll('.ms-dropdown.open').forEach(d => { if (d !== mount) { d.querySelector('.ms-panel').hidden = true; d.classList.remove('open'); } });
+    panel.hidden = false; mount.classList.add('open'); setTimeout(() => searchInput.focus(), 0);
+  }
+  function fechar() { panel.hidden = true; mount.classList.remove('open'); }
+  btn.addEventListener('click', (e) => { e.stopPropagation(); panel.hidden ? abrir() : fechar(); });
+  document.addEventListener('click', (e) => { if (!mount.contains(e.target)) fechar(); });
+  searchInput.addEventListener('click', (e) => e.stopPropagation());
+  searchInput.addEventListener('keydown', (e) => e.stopPropagation());
+  searchInput.addEventListener('input', () => {
+    const q = normC(searchInput.value.trim()); let vis = 0;
+    opts.forEach(o => { const ok = !q || normC(o.textContent).includes(q); o.style.display = ok ? '' : 'none'; if (ok) vis++; });
+    emptyEl.hidden = vis > 0;
+  });
+  opts.forEach(o => o.addEventListener('click', (e) => {
+    e.stopPropagation();
+    curVal = o.dataset.value; valueEl.textContent = findText(curVal); markSel();
+    mount.classList.toggle('has-selection', String(curVal) !== String(todosValue));
+    fechar(); onChange(curVal);
+  }));
+  return { fechar };
+}
+
 function derivar(a) {
   return { ...a,
     win_rate: (a.ganhos + a.perdidos) ? a.ganhos/(a.ganhos+a.perdidos)*100 : 0,
@@ -925,9 +973,14 @@ function renderRecorteFiltros() {
     const cursos = (((CS.data.filtros_disponiveis || {}).produtos) || []).slice().sort(byName);
     host.innerHTML =
       `<select id="cFiltroCloser" class="sel-inline" aria-label="Filtrar por closer">${opt(closers, CS.closerSel, 'Closer: todos')}</select>` +
-      `<select id="cFiltroCurso" class="sel-inline" aria-label="Filtrar por curso">${opt(cursos, CS.cursoSel, 'Curso: todos')}</select>`;
+      `<div id="cFiltroCurso" class="ss-mount" aria-label="Filtrar por curso"></div>`;
     document.getElementById('cFiltroCloser').onchange = (e) => { CS.closerSel = e.target.value || null; if (CS.closerSel) CS.cursoSel = null; renderAllC(); };
-    document.getElementById('cFiltroCurso').onchange = (e) => { CS.cursoSel = e.target.value || null; if (CS.cursoSel) CS.closerSel = null; renderAllC(); };
+    createSearchableSelectC({
+      mount: document.getElementById('cFiltroCurso'),
+      label: 'Curso', placeholder: 'Curso: todos', value: CS.cursoSel || '', todosValue: '',
+      options: cursos.map(c => ({ value: c, text: c })),
+      onChange: (v) => { CS.cursoSel = v || null; if (CS.cursoSel) CS.closerSel = null; renderAllC(); },
+    });
   } else {
     const sdrs = (CS.data.sdrs || []).map(s => s.nome).sort(byName);
     host.innerHTML = `<select id="cFiltroSdr" class="sel-inline" aria-label="Filtrar por SDR">${opt(sdrs, CS.sdrSel, 'SDR: todos')}</select>`;
@@ -1259,14 +1312,22 @@ function setupFiltrosC() {
   const selCursoV = document.getElementById('cSelCursoVenda');
   if (selCursoV) {
     const cursosV = (CS.data.filtros_disponiveis && CS.data.filtros_disponiveis.produtos) || distintos(CS.data.venda_closer_curso_diario, 'curso');
-    selCursoV.innerHTML = optTodos(cursosV, 'Todos os cursos');
-    selCursoV.onchange = () => { CS.selCursoVenda = selCursoV.value; renderVendaDia(); };
+    createSearchableSelectC({
+      mount: selCursoV, label: 'Curso', placeholder: 'Todos os cursos', value: CS.selCursoVenda, todosValue: 'todos',
+      options: cursosV.map(c => ({ value: c, text: c })),
+      onChange: (v) => { CS.selCursoVenda = v || 'todos'; renderVendaDia(); },
+    });
   }
 
   const selCurso = document.getElementById('cSelCurso');
-  const cursos = (CS.data.filtros_disponiveis && CS.data.filtros_disponiveis.produtos) || distintos(CS.data.closer_curso_mensal, 'curso');
-  selCurso.innerHTML = optTodos(cursos, 'Todos os cursos');
-  selCurso.onchange = () => { CS.selCurso = selCurso.value; renderCloserCursoC(); };
+  if (selCurso) {
+    const cursos = (CS.data.filtros_disponiveis && CS.data.filtros_disponiveis.produtos) || distintos(CS.data.closer_curso_mensal, 'curso');
+    createSearchableSelectC({
+      mount: selCurso, label: 'Curso', placeholder: 'Todos os cursos', value: CS.selCurso, todosValue: 'todos',
+      options: cursos.map(c => ({ value: c, text: c })),
+      onChange: (v) => { CS.selCurso = v || 'todos'; renderCloserCursoC(); },
+    });
+  }
 }
 
 // ---------- Init ----------
