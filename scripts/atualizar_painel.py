@@ -359,6 +359,7 @@ def calcula_atribuicao(neg: pd.DataFrame, rd: pd.DataFrame) -> dict:
     quali_status = ["Qualificação OK", "Check Liderança"]
     neg_quali = neg[neg["Negócio - Qualificação/Feedback:"].isin(quali_status)]
     reunioes_assist_ids = set()
+    reunioes_assist_meses = {}   # 'YYYY-MM' -> qtd (p/ distribuir o funil por mês)
     for _, row in neg_quali.iterrows():
         emails = emails_do_negocio(row)
         eventos = []
@@ -378,6 +379,8 @@ def calcula_atribuicao(neg: pd.DataFrame, rd: pd.DataFrame) -> dict:
         for d, g in eventos:
             if pd.notna(d) and pd.notna(g) and d <= data_ref and g == 'Topo':
                 reunioes_assist_ids.add(int(row['Negócio - ID']))
+                ym = pd.Timestamp(data_ref).strftime('%Y-%m')   # mês da reunião assistida
+                reunioes_assist_meses[ym] = reunioes_assist_meses.get(ym, 0) + 1
                 break
 
     return {
@@ -385,6 +388,7 @@ def calcula_atribuicao(neg: pd.DataFrame, rd: pd.DataFrame) -> dict:
             'assistencia_neg_ids': topo_assist_ids,
             'faturamento_influenciado': round(topo_faturamento, 2),
             'reunioes_assistidas_ids': reunioes_assist_ids,
+            'reunioes_assist_meses': reunioes_assist_meses,
         },
         'fundo': {
             'ganhos_neg_ids': set(int(x) for x in ganhos['Negócio - ID']),
@@ -1385,11 +1389,11 @@ def funil_topo_assistencia(rd: pd.DataFrame, neg: pd.DataFrame,
     neg_assist_ganho["AnoMes"] = neg_assist_ganho["Negócio - Ganho em"].dt.to_period("M").astype(str)
     s_vendas = neg_assist_ganho.groupby("AnoMes").size().to_dict()
     s_faturamento = neg_assist_ganho.groupby("AnoMes")["Negócio - Valor"].sum().to_dict()
-    # Reuniões: já no detalhamento mensal existente (vamos pegar o que tem em mensal[Topo].reunioes_qualificadas posteriormente, ou usar atividades)
-    # Para simplicidade aqui retornamos apenas os 5 dados, e a etapa 5 fica como "reunioes_qualificadas" do mensal[Topo] que já existe
+    # Reuniões assistidas por mês (mesma data de referência usada na atribuição → soma fecha com o total)
+    s_reunioes = atribuicao["topo"].get("reunioes_assist_meses", {})
 
     todos_meses = sorted(set(s_leads_topo) | set(s_mqls_topo) | set(s_leads_fundo)
-                        | set(s_mqls_fundo) | set(s_vendas))
+                        | set(s_mqls_fundo) | set(s_vendas) | set(s_reunioes))
     mensal = []
     for m in todos_meses:
         try:
@@ -1402,6 +1406,7 @@ def funil_topo_assistencia(rd: pd.DataFrame, neg: pd.DataFrame,
             "mqls_topo": s_mqls_topo.get(m, 0),
             "leads_fundo_assist": s_leads_fundo.get(m, 0),
             "mqls_fundo_assist": s_mqls_fundo.get(m, 0),
+            "reunioes_assist": s_reunioes.get(m, 0),
             "vendas_assist": s_vendas.get(m, 0),
             "faturamento_assist": round(float(s_faturamento.get(m, 0.0)), 2),
         })
