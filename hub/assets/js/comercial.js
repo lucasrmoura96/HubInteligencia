@@ -733,7 +733,9 @@ function renderSdrsC() {
   const linhas = sdrEntidades().map(s => {
     const a = somaSdr(s.mensal); const nv = sdrNovos(s.nome);
     return { nome:s.nome, is_bot:s.is_bot, sem:s.sem, mqls:nv.mqls, prop:a.propostas, reuT:a.reunioes_total, reuOk:a.reunioes_ok, ns:a.no_show, nsRate:a.no_show_rate, mensalSerie:s.mensal };
-  }).filter(s => s.reuT>0 || s.prop>0 || s.ns>0 || s.mqls>0).sort((a,b) => b.reuOk - a.reuOk);
+  // GATE: só SDR com ATIVIDADE real no período (reunião/proposta/no-show). Quem só tem MQL
+  // atribuído (ex.: desligados que recebem MQL de negócio antigo) NÃO entra — vai pra nota.
+  }).filter(s => s.reuT>0 || s.prop>0 || s.ns>0).sort((a,b) => b.reuOk - a.reuOk);
   const tag = (s) => s.is_bot ? '<span class="sdr-tag bot">automação</span>' : (s.sem ? '<span class="sdr-tag sem">sem SDR</span>' : '');
 
   // Pódio: top 3 SDRs HUMANOS por reuniões qualificadas OK (bot/sem SDR nunca no pódio)
@@ -768,11 +770,13 @@ function renderSdrsC() {
       </tr>${drill}`;
   }).join('');
 
-  // Nota: MQLs sem SDR atribuído (sempre visível, reconcilia com o funil)
-  const naoAtrib = mqlsNaoAtribuido();
-  const atrib = linhas.reduce((t,s) => t + s.mqls, 0);
-  const totMql = atrib + naoAtrib;
-  const nota = totMql ? `<div class="rank-note">MQLs sem SDR atribuído no período: <b>${cN(naoAtrib)}</b> de ${cN(totMql)} (${cPct(naoAtrib/totMql*100)}) — leads que ainda não viraram negócio no Pipedrive.</div>` : '';
+  // Nota: MQLs fora das linhas mostradas (sempre visível, RECONCILIA com o funil).
+  // = total do período − soma dos SDRs ativos exibidos. Inclui: leads sem negócio +
+  //   MQLs atribuídos a SDRs sem atividade no período (ex.: desligados).
+  const totMql = (CS.data.mensal || []).filter(m => cTupleAtivo(m.ano, m.mes)).reduce((t,m) => t + (m.mqls||0), 0);
+  const mostrado = linhas.reduce((t,s) => t + s.mqls, 0);
+  const fora = Math.max(0, totMql - mostrado);
+  const nota = totMql ? `<div class="rank-note">MQLs não atribuídos a um SDR ativo no período: <b>${cN(fora)}</b> de ${cN(totMql)} (${cPct(fora/totMql*100)}) — leads que ainda não viraram negócio no Pipedrive ou de SDRs sem atividade no mês.</div>` : '';
 
   const tabela = `
     <table class="rank-table">
