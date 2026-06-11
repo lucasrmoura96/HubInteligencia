@@ -3453,6 +3453,15 @@ tr.open .expand-icon { transform: rotate(90deg); color: var(--brand-500); }
 .pct-pill.good { background: var(--positive-soft); color: var(--positive); }
 .pct-pill.mid  { background: var(--warn-soft); color: var(--warn); }
 .pct-pill.bad  { background: var(--negative-soft); color: var(--negative); }
+.pct-na { color: var(--text-muted); opacity: 0.6; font-family: var(--font-mono); font-size: 0.72rem; }
+/* Nota sob tabelas de ranking (ex.: MQLs não atribuídos a SDR) */
+.rank-note {
+  margin-top: 10px; padding: 9px 13px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem; color: var(--text-soft); line-height: 1.45;
+}
+.rank-note b { color: var(--text); font-weight: 700; }
 
 .cursos-mini {
   display: flex; flex-direction: column; gap: 2px;

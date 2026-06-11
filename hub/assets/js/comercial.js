@@ -305,6 +305,27 @@ function somaSdr(serie) {
   acc.conv_mql_rq = acc.mqls ? acc.reunioes_ok / acc.mqls * 100 : 0;
   return acc;
 }
+// Métricas NOVAS do SDR (sempre do total — RD/atribuição não separam por tipo): MQLs atribuídos,
+// RQ (negócios distintos com reunião quali OK), vendas geradas e faturamento influenciado.
+function sdrNovos(nome) {
+  const base = (CS.data.sdrs || []).find(s => s.nome === nome);
+  const acc = { mqls:0, rq_neg:0, rq_ganhos:0, fat_infl:0 };
+  if (base) (base.mensal || []).forEach(m => { if (!cTupleAtivo(m.ano, m.mes)) return;
+    acc.mqls += m.mqls||0; acc.rq_neg += m.rq_neg||0; acc.rq_ganhos += m.rq_ganhos||0; acc.fat_infl += m.fat_infl||0; });
+  acc.rq_venda_pct = acc.rq_neg ? acc.rq_ganhos / acc.rq_neg * 100 : 0;
+  return acc;
+}
+// MQLs do período que NÃO foram atribuídos a um SDR (leads que não viraram negócio)
+function mqlsNaoAtribuido() {
+  return (CS.data.sdr_mqls_nao_atribuido || [])
+    .filter(r => cTupleAtivo(r.ano, r.mes)).reduce((s, r) => s + (r.qtd || 0), 0);
+}
+// Detalhe de reuniões geradas por um SDR no período (curso + data), p/ o drilldown
+function sdrReunioesDetalhe(nome) {
+  return (CS.data.sdr_reunioes_detalhe || [])
+    .filter(r => r.sdr === nome && cDataIsoAtiva(r.data))
+    .sort((a, b) => (a.data < b.data ? 1 : a.data > b.data ? -1 : 0));
+}
 
 // ---------- MoM: período anterior comparável (só quando 1 mês + 1 ano, sem dia/range) ----------
 function kpisPeriodoAnterior() {
@@ -710,12 +731,12 @@ function renderClosersC() {
 // ---------- Pódio + Ranking SDRs (por ATIVIDADE) ----------
 function renderSdrsC() {
   const linhas = sdrEntidades().map(s => {
-    const a = somaSdr(s.mensal);
-    return { nome:s.nome, is_bot:s.is_bot, sem:s.sem, prop:a.propostas, reuT:a.reunioes_total, reuOk:a.reunioes_ok, ns:a.no_show, nsRate:a.no_show_rate, mensalSerie:s.mensal };
-  }).filter(s => s.reuT>0 || s.prop>0 || s.ns>0).sort((a,b) => b.reuOk - a.reuOk);
+    const a = somaSdr(s.mensal); const nv = sdrNovos(s.nome);
+    return { nome:s.nome, is_bot:s.is_bot, sem:s.sem, mqls:nv.mqls, prop:a.propostas, reuT:a.reunioes_total, reuOk:a.reunioes_ok, ns:a.no_show, nsRate:a.no_show_rate, mensalSerie:s.mensal };
+  }).filter(s => s.reuT>0 || s.prop>0 || s.ns>0 || s.mqls>0).sort((a,b) => b.reuOk - a.reuOk);
   const tag = (s) => s.is_bot ? '<span class="sdr-tag bot">automação</span>' : (s.sem ? '<span class="sdr-tag sem">sem SDR</span>' : '');
 
-  // Pódio: top 3 SDRs HUMANOS por reuniões qualificadas OK
+  // Pódio: top 3 SDRs HUMANOS por reuniões qualificadas OK (bot/sem SDR nunca no pódio)
   const humanos = linhas.filter(s => !s.is_bot && !s.sem).slice(0, 3);
   const emoji = ['🥇','🥈','🥉'], medal = ['gold','silver','bronze'];
   const podio = `
@@ -730,20 +751,37 @@ function renderSdrsC() {
         </div>`).join('')}
     </div>`;
 
+  const corpo = linhas.map((s,i) => {
+    const det = sdrReunioesDetalhe(s.nome);
+    const drill = det.length ? `
+      <tr class="drill-row hidden"><td></td><td colspan="8"><div class="drill-box">
+        <div class="drill-title">Reuniões geradas por ${escC(s.nome)} · curso e data de geração</div>
+        ${det.map(r => `<div class="drill-item"><span class="di-nome">${escC(lblCurso(r.curso))}</span><span class="di-q">${cDataBR(r.data)}${r.qtd>1?` · ${r.qtd} reuniões`:''}${r.qtd_ok?` · ${r.qtd_ok} quali OK`:''}</span><span class="di-fat">${r.qtd_venda?`✅ ${r.qtd_venda} virou venda`:''}</span></div>`).join('')}
+      </div></td></tr>` : '';
+    return `
+      <tr class="${s.is_bot?'is-bot':''} ${det.length?'row-click':''}">
+        <td class="pos">${i+1}</td><td class="nome">${det.length?'<span class="drill-caret">▸</span> ':''}${escC(s.nome)} ${tag(s)}</td>
+        <td class="num"><b>${cN(s.mqls)}</b></td>
+        <td class="num">${cN(s.prop)}</td><td class="num">${cN(s.reuT)}</td>
+        <td class="num"><b>${cN(s.reuOk)}</b></td><td class="num">${cN(s.ns)}</td><td class="num">${cPct(s.nsRate)}</td>
+        <td class="spark-td">${sparkline(ultimosMeses(s.mensalSerie,'reunioes_ok',12))}</td>
+      </tr>${drill}`;
+  }).join('');
+
+  // Nota: MQLs sem SDR atribuído (sempre visível, reconcilia com o funil)
+  const naoAtrib = mqlsNaoAtribuido();
+  const atrib = linhas.reduce((t,s) => t + s.mqls, 0);
+  const totMql = atrib + naoAtrib;
+  const nota = totMql ? `<div class="rank-note">MQLs sem SDR atribuído no período: <b>${cN(naoAtrib)}</b> de ${cN(totMql)} (${cPct(naoAtrib/totMql*100)}) — leads que ainda não viraram negócio no Pipedrive.</div>` : '';
+
   const tabela = `
     <table class="rank-table">
-      <thead><tr><th>#</th><th>SDR</th><th class="spark-th">12m · reuniões OK</th><th class="num">Proposta wpp</th><th class="num">Reuniões</th><th class="num">Reuniões Quali OK</th><th class="num">No-show</th><th class="num">No-show %</th></tr></thead>
-      <tbody>
-        ${linhas.map((s,i) => `
-          <tr class="${s.is_bot?'is-bot':''}">
-            <td class="pos">${i+1}</td><td class="nome">${escC(s.nome)} ${tag(s)}</td>
-            <td class="spark-td">${sparkline(ultimosMeses(s.mensalSerie,'reunioes_ok',12))}</td>
-            <td class="num">${cN(s.prop)}</td><td class="num">${cN(s.reuT)}</td>
-            <td class="num"><b>${cN(s.reuOk)}</b></td><td class="num">${cN(s.ns)}</td><td class="num">${cPct(s.nsRate)}</td>
-          </tr>`).join('')}
-      </tbody>
-    </table>`;
-  document.getElementById('cSdrs').innerHTML = podio + tabela;
+      <thead><tr><th>#</th><th>SDR</th><th class="num" title="MQLs que viraram negócio atribuído a este SDR (e-mail RD↔Pipedrive). Não-atribuídos na nota abaixo.">MQLs</th><th class="num">Proposta wpp</th><th class="num">Reuniões</th><th class="num">Reuniões Quali OK</th><th class="num">No-show</th><th class="num">No-show %</th><th class="spark-th">12m · reun. OK</th></tr></thead>
+      <tbody>${corpo}</tbody>
+    </table>${nota}`;
+  const host = document.getElementById('cSdrs');
+  host.innerHTML = podio + tabela;
+  wireDrill(host);
 }
 
 // ---------- Helper: chart diário (barras por dia) ----------
@@ -1066,22 +1104,25 @@ function renderCursoPerf() {
 // ---------- Eficiência · SDRs (aproveitamento das reuniões, não só volume) ----------
 function renderEfSdr() {
   const linhas = sdrEntidades().map(s => {
-    const a = somaSdr(s.mensal);
-    return { nome:s.nome, is_bot:s.is_bot, sem:s.sem, reuT:a.reunioes_total, reuOk:a.reunioes_ok, ns:a.no_show,
-      aprov: a.aproveitamento, nsRate: a.no_show_rate };
-  }).filter(s => s.reuT >= 5)  // volume mínimo de reuniões p/ a taxa fazer sentido
-    .sort((a,b) => b.aprov - a.aprov);
+    const a = somaSdr(s.mensal); const nv = sdrNovos(s.nome);
+    return { nome:s.nome, is_bot:s.is_bot, sem:s.sem, reuT:a.reunioes_total, aprov:a.aproveitamento, nsRate:a.no_show_rate,
+      rqNeg:nv.rq_neg, rqVendaPct:nv.rq_venda_pct, vendas:nv.rq_ganhos, fat:nv.fat_infl };
+  }).filter(s => s.reuT >= 5)  // volume mínimo de reuniões p/ as taxas fazerem sentido
+    .sort((a,b) => b.rqVendaPct - a.rqVendaPct || b.vendas - a.vendas);
   const tag = (s) => s.is_bot ? '<span class="sdr-tag bot">automação</span>' : (s.sem ? '<span class="sdr-tag sem">sem SDR</span>' : '');
+  const rqv = (s) => s.rqNeg ? pillC(s.rqVendaPct, 25, 15) : '<span class="pct-na">—</span>';
   document.getElementById('cEfSdr').innerHTML = `
     <table class="rank-table">
-      <thead><tr><th>#</th><th>SDR</th><th class="num">Reuniões</th><th class="num">Quali OK</th><th class="num">Aproveitamento</th><th class="num">No-show %</th></tr></thead>
+      <thead><tr><th>#</th><th>SDR</th><th class="num">Aproveitamento</th><th class="num">No-show %</th><th class="num" title="Das reuniões qualificadas (Quali OK) geradas pelo SDR, quantas viraram venda">RQ→Venda</th><th class="num">Vendas geradas</th><th class="num" title="Faturamento dos negócios cujo SDR gerou a reunião qualificada (influência — quem fecha é o closer)">Faturamento influência</th></tr></thead>
       <tbody>
         ${linhas.map((s,i) => `
           <tr class="${s.is_bot?'is-bot':''}">
             <td class="pos">${i+1}</td><td class="nome">${escC(s.nome)} ${tag(s)}</td>
-            <td class="num">${cN(s.reuT)}</td><td class="num"><b>${cN(s.reuOk)}</b></td>
             <td class="num">${pillC(s.aprov, 80, 60)}</td>
             <td class="num">${pillC(s.nsRate, 15, 30, true)}</td>
+            <td class="num">${rqv(s)}</td>
+            <td class="num"><b>${cN(s.vendas)}</b></td>
+            <td class="num">${cR$(s.fat)}</td>
           </tr>`).join('')}
       </tbody>
     </table>`;

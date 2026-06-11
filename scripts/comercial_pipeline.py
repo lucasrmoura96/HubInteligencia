@@ -41,6 +41,17 @@ def curso_tipo(curso):
     if c.startswith('pos'): return 'pos'
     return 'outros'
 
+# ---------- E-mail (chave de cruzamento RD <-> Pipedrive) ----------
+def norm_email(x):
+    s = str(x if x is not None else '').strip().lower()
+    return s if '@' in s else ''
+
+def emails_cell(x):
+    """Extrai e-mails normalizados de uma célula (pode ter vários separados por ; , ou espaço)."""
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return []
+    return [e for e in (norm_email(p) for p in re.split(r'[;,\s]+', str(x))) if e]
+
 
 def main():
     log(f"Lendo {NEG_FILE.name}")
@@ -240,17 +251,108 @@ def main():
     av["is_prop"] = av["_tipo"].str.contains("Proposta", case=False, na=False)
     av["is_ns"] = av["_tipo"].str.contains("No Show", case=False, na=False)
     av["is_reu_ok"] = av["is_reu"] & av["_ok"]
-    sdr_raw_at = {}
-    for (sdr, m), sub in av.groupby(["sdr", "AnoMes"]):
+    # ============================================================
+    # Cruzamento MQL->SDR (e-mail RD<->Pipedrive) + Qualidade (RQ->Venda) + Detalhe
+    # ============================================================
+    # Mapas por Negócio-ID (chave int)
+    id_ganho = {int(nid): bool(g) for nid, g in zip(neg["Negócio - ID"], neg["is_ganho"]) if pd.notna(nid)}
+    id_valor = {int(nid): float(v or 0.0) for nid, v in zip(neg["Negócio - ID"], neg["valor"]) if pd.notna(nid)}
+    id_curso = {int(nid): (str(c) if pd.notna(c) else "(sem produto)")
+                for nid, c in zip(neg["Negócio - ID"], neg["Negócio - Produto de Interesse"]) if pd.notna(nid)}
+
+    def _sdr_norm(s):
+        if s is None or (isinstance(s, float) and pd.isna(s)): return "(sem SDR)"
+        s = str(s).strip()
+        return "(sem SDR)" if s in ("", "nan", "Sem SDR") else s
+
+    # e-mail -> [(criado, sdr)] dos negócios (desempate por proximidade de data)
+    neg_email_map = {}
+    for criado, et, eo, sdr in zip(neg["_criado"], neg["Pessoa - E-mail - Trabalho"],
+                                   neg["Pessoa - E-mail - Outros"], neg["Negócio - Proprietário SDR"]):
+        s = _sdr_norm(sdr)
+        for e in set(emails_cell(et)) | set(emails_cell(eo)):
+            neg_email_map.setdefault(e, []).append((criado, s))
+
+    def attrib_sdr(email, dmql):
+        cands = neg_email_map.get(email)
+        if not cands: return None
+        def k(c):
+            cr = c[0]
+            if pd.isna(cr) or pd.isna(dmql): return (2, 0)
+            delta = (cr - dmql).days
+            return (0, delta) if delta >= 0 else (1, -delta)  # negócio criado APÓS o MQL primeiro
+        return sorted(cands, key=k)[0][1]
+
+    # Acumulador unificado SDR x mês
+    sdr_acc = {}
+    def sdr_rec(sdr, m):
         a, me = m.split("-")
-        sdr_raw_at.setdefault(sdr, {})[m] = {
+        return sdr_acc.setdefault(sdr, {}).setdefault(m, {
             "ano": int(a), "mes": int(me),
-            "propostas": int(sub["is_prop"].sum()),
-            "reunioes_total": int(sub["is_reu"].sum()),
-            "reunioes_ok": int(sub["is_reu_ok"].sum()),
-            "no_show": int(sub["is_ns"].sum()),
-        }
-    sdrs = empacota(sdr_raw_at, marca_bot=True)
+            "propostas": 0, "reunioes_total": 0, "reunioes_ok": 0, "no_show": 0,
+            "mqls": 0, "rq_neg": 0, "rq_ganhos": 0, "fat_infl": 0.0,
+        })
+
+    # (1) Atividades
+    for (sdr, m), sub in av.groupby(["sdr", "AnoMes"]):
+        r = sdr_rec(sdr, m)
+        r["propostas"]      += int(sub["is_prop"].sum())
+        r["reunioes_total"] += int(sub["is_reu"].sum())
+        r["reunioes_ok"]    += int(sub["is_reu_ok"].sum())
+        r["no_show"]        += int(sub["is_ns"].sum())
+
+    # (2) MQLs atribuídos por SDR (data de conversão RD) + não-atribuídos por mês
+    rd_f["_email"] = rd_f["E-mail Lead"].apply(norm_email)
+    mqls_naoatrib = {}
+    for m, email, dconv in zip(rd_f["AnoMes"], rd_f["_email"], rd_f["_dt"]):
+        sdr = attrib_sdr(email, dconv) if email else None
+        if sdr is not None and sdr != "(sem SDR)":
+            sdr_rec(sdr, m)["mqls"] += 1
+        else:
+            mqls_naoatrib[m] = mqls_naoatrib.get(m, 0) + 1
+
+    # (3) Qualidade: RQ->Venda (negócio distinto, cohort = mês da 1ª reunião Quali OK do SDR)
+    avq = av[av["is_reu_ok"]].copy()
+    avq["_nid"] = pd.to_numeric(avq["Negócio - ID"], errors="coerce")
+    avq = avq.dropna(subset=["_nid"]).sort_values("_dt")
+    seen_rq = set()
+    for sdr, nid, m in zip(avq["sdr"], avq["_nid"].astype(int), avq["AnoMes"]):
+        if (sdr, nid) in seen_rq: continue
+        seen_rq.add((sdr, nid))
+        r = sdr_rec(sdr, m)
+        r["rq_neg"] += 1
+        if id_ganho.get(nid, False):
+            r["rq_ganhos"] += 1
+            r["fat_infl"] = round(r["fat_infl"] + id_valor.get(nid, 0.0), 2)
+
+    sdrs = empacota(sdr_acc, marca_bot=True)
+
+    # MQLs não atribuídos a SDR (lista mensal — front exibe como nota)
+    sdr_mqls_nao_atribuido = [
+        {"ano": int(m.split("-")[0]), "mes": int(m.split("-")[1]), "qtd": q}
+        for m, q in sorted(mqls_naoatrib.items())
+    ]
+
+    # (4) Detalhe de reuniões por SDR (drilldown): curso + data de geração (agregado)
+    det_acc = {}
+    rdet = reuniao_ok.copy()
+    rdet["_dt"] = pd.to_datetime(rdet["Atividade - Data adicionada"], errors="coerce")
+    rdet = rdet[rdet["_dt"].dt.year >= ANO_INI]
+    rdet["data"] = rdet["_dt"].dt.strftime("%Y-%m-%d")
+    rdet["sdr"] = rdet["Negócio - Proprietário SDR"].fillna("(sem SDR)").astype(str)
+    rdet["_ok"] = rdet["Negócio - Qualificação/Feedback:"].isin(QUALI_OK)
+    rdet["_nid"] = pd.to_numeric(rdet["Negócio - ID"], errors="coerce")
+    for sdr, data, ok, nid in zip(rdet["sdr"], rdet["data"], rdet["_ok"], rdet["_nid"]):
+        nid_i = int(nid) if pd.notna(nid) else None
+        curso = id_curso.get(nid_i, "(sem produto)") if nid_i is not None else "(sem produto)"
+        venda = bool(id_ganho.get(nid_i, False)) if nid_i is not None else False
+        rec = det_acc.setdefault((sdr, data, curso), {"qtd": 0, "qtd_ok": 0, "qtd_venda": 0})
+        rec["qtd"] += 1
+        if ok: rec["qtd_ok"] += 1
+        if venda: rec["qtd_venda"] += 1
+    sdr_reunioes_detalhe = [
+        {"sdr": s, "data": d, "curso": c, **v} for (s, d, c), v in det_acc.items()
+    ]
 
     # ---------- Motivos de perda (mensal) ----------
     perd = neg[neg["is_perdido"]].copy()
@@ -397,6 +499,8 @@ def main():
         "sdr_tipo_mensal": sdr_tipo_mensal,
         "closers": closers,
         "sdrs": sdrs,
+        "sdr_mqls_nao_atribuido": sdr_mqls_nao_atribuido,
+        "sdr_reunioes_detalhe": sdr_reunioes_detalhe,
         "sdr_reunioes_diario": sdr_reunioes_diario,
         "closer_vendas_diario": closer_vendas_diario,
         "venda_closer_curso_diario": venda_closer_curso_diario,
