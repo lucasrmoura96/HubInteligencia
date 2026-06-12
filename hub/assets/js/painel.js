@@ -1837,7 +1837,24 @@ function chartCommonOpts(theme) {
 
 function renderSerieTemporal() {
   const tab = STATE.data[STATE.tab];
-  let meses = tab.mensal;
+  // Série base: quando há filtro de Tipo/Curso, agrega leads/mqls/custo por mês via
+  // por_curso_mensal (mesma fonte das KPIs). Sem filtro, usa a mensal global.
+  // (leads/mqls/custo são idênticos nas duas visões — toggle origem não afeta este gráfico)
+  let meses;
+  if (STATE.tipoCurso !== 'all' || (STATE.cursos && STATE.cursos.length)) {
+    const acc = new Map();
+    (tab.por_curso_mensal || []).forEach(r => {
+      if (!cursoAtivo(r.curso)) return;
+      if (!cursoMatchTipo(r.curso, STATE.tipoCurso)) return;
+      const periodo = `${r.ano}-${String(r.mes).padStart(2, '0')}`;
+      let A = acc.get(periodo);
+      if (!A) { A = { periodo, ano: r.ano, mes: r.mes, leads: 0, mqls: 0, custo: 0 }; acc.set(periodo, A); }
+      A.leads += r.leads || 0; A.mqls += r.mqls || 0; A.custo += r.custo || 0;
+    });
+    meses = Array.from(acc.values()).sort((a, b) => (a.periodo < b.periodo ? -1 : 1));
+  } else {
+    meses = tab.mensal;
+  }
   // Estratégia: gráfico de tendência precisa de contexto histórico — ignora o filtro
   // específico de MÊS (mostraria 1 barra só) mas respeita o filtro de ANO.
   // Se ano específico: mostra esse ano inteiro. Se ano=all: últimos 12 meses.
@@ -2170,8 +2187,9 @@ function renderFontes() {
     });
     fontes = Object.values(acc).sort((a, b) => b.leads - a.leads);
     document.getElementById('chartFontesTitle').textContent = `Fontes · "${STATE.selecao.valor}"`;
-  } else if (STATE.tipoCurso !== 'all') {
-    // Filtro de tipo ativo — agrega fontes apenas das campanhas que tem cursos do tipo
+  } else if (STATE.tipoCurso !== 'all' || (STATE.cursos && STATE.cursos.length)) {
+    // Filtro de tipo e/ou curso ativo — agrega fontes das campanhas filtradas
+    // (getTodasCampanhasFiltradas já aplica curso/período; cursoMatchTipo é no-op se tipo='all')
     const acc = {};
     getTodasCampanhasFiltradas().filter(c => (c.cursos || []).some(cu => cursoMatchTipo(cu, STATE.tipoCurso))).forEach(c => {
       (c.fontes || []).forEach(f => {
@@ -2181,7 +2199,9 @@ function renderFontes() {
       });
     });
     fontes = Object.values(acc).sort((a, b) => b.leads - a.leads).slice(0, 10);
-    const labelTipo = { mba: 'MBA', pos: 'Pós', imersoes: 'Imersões' }[STATE.tipoCurso] || STATE.tipoCurso;
+    const labelTipo = STATE.tipoCurso !== 'all'
+      ? ({ mba: 'MBA', pos: 'Pós', imersoes: 'Imersões' }[STATE.tipoCurso] || STATE.tipoCurso)
+      : (STATE.cursos.length === 1 ? STATE.cursos[0] : `${STATE.cursos.length} cursos`);
     document.getElementById('chartFontesTitle').textContent = `Fontes · ${labelTipo}`;
   } else {
     fontes = tab.distribuicoes.por_fonte;
@@ -2446,14 +2466,22 @@ function calcRankingFiltrado() {
     return tab.ranking_criativos;
   }
 
+  // Campanhas já filtradas por período + curso (árvore). Reusada para enriquecer com
+  // fontes/criativos e, quando há filtro de curso, como allow-list de campanhas válidas.
+  const todas = getTodasCampanhasFiltradas();
+  const cursoAllow = (STATE.cursos && STATE.cursos.length)
+    ? new Set(todas.map(c => c.campanha))
+    : null;
+
   // Filtra campanhas_mensal pelos meses no recorte (sem filtro temporal → todos os meses)
   const meses = (tab.campanhas_mensal || []).filter(m => tupleAtivo(m.ano, m.mes));
   if (!meses.length) return { top5: [], bottom5: [], total_campanhas_avaliadas: 0 };
 
-  // Agrega campanhas
+  // Agrega campanhas (respeitando o filtro de curso via allow-list)
   const acc = {};
   meses.forEach(mObj => {
     (mObj.campanhas || []).forEach(c => {
+      if (cursoAllow && !cursoAllow.has(c.campanha)) return;
       if (!acc[c.campanha]) acc[c.campanha] = { campanha: c.campanha, leads: 0, mqls: 0, custo: 0 };
       acc[c.campanha].leads += c.leads;
       acc[c.campanha].mqls  += c.mqls;
@@ -2472,9 +2500,8 @@ function calcRankingFiltrado() {
     camps = camps.filter(c => c.leads >= MIN_LEADS && c.custo >= 1);
   }
 
-  // Anexa fontes/criativos da Galeria — AGORA respeitando o filtro temporal
-  // (usa campanhas_arvore_mensal via getTodasCampanhasFiltradas)
-  const todas = getTodasCampanhasFiltradas();
+  // Anexa fontes/criativos da Galeria — respeitando o filtro temporal + curso
+  // (usa `todas` = campanhas_arvore_mensal já filtradas, calculado acima)
   const enrich = (c) => {
     const full = todas.find(x => x.campanha === c.campanha);
     return { ...c, fontes: full ? full.fontes : [] };
@@ -3090,10 +3117,8 @@ function calcTickerFactsMkt() {
     A.leads += r.leads || 0; A.mqls += r.mqls || 0; A.custo += r.custo || 0;
   });
   const cursos = Object.entries(cAcc).map(([curso, a]) => ({ curso, ...a, cpmql: a.mqls ? a.custo / a.mqls : 0 }));
-  // Dias (pico de MQLs)
-  const dAcc = {};
-  (tab.diario || []).forEach(d => { if (!dataIsoAtiva(d.data)) return; dAcc[d.data] = (dAcc[d.data] || 0) + (d.mqls || 0); });
-  const dias = Object.entries(dAcc).map(([data, mqls]) => ({ data, mqls }));
+  // Dias (pico de MQLs) — getDiarioFiltrado respeita período + curso + tipo
+  const dias = getDiarioFiltrado().map(l => ({ data: l.data, mqls: l.mqls }));
 
   const facts = [];
   const comMql = cursos.filter(c => c.mqls > 0);
@@ -3204,9 +3229,10 @@ function renderCanaisPagos() {
   // Decide se usa dados filtrados (mensal) ou globais (sempre filtra via helpers)
   let porFonteAgregado = [];
   const acc = {};
-  if (STATE.tipoCurso !== 'all') {
-    // Com filtro de TIPO: agrega fonte×curso via campanhas (mesma fonte do funil),
-    // incluindo a campanha cujo curso casa o tipo selecionado.
+  if (STATE.tipoCurso !== 'all' || (STATE.cursos && STATE.cursos.length)) {
+    // Com filtro de TIPO e/ou CURSO: agrega fonte×campanha via campanhas (mesma fonte
+    // do funil/galeria), já filtradas por curso/período em getTodasCampanhasFiltradas.
+    // (cursoMatchTipo é no-op quando tipo='all', então só o filtro de curso atua)
     getTodasCampanhasFiltradas()
       .filter(c => (c.cursos || []).some(cu => cursoMatchTipo(cu, STATE.tipoCurso)))
       .forEach(c => (c.fontes || []).forEach(f => {
@@ -3355,8 +3381,9 @@ function renderCanalDrawer() {
 
   // Agrega por nome de campanha (do canal), respeitando filtro de data.
   const acc = {};
-  if (STATE.tipoCurso !== 'all') {
-    // Com filtro de TIPO: usa as campanhas já filtradas por tipo e pega a fatia desta fonte.
+  if (STATE.tipoCurso !== 'all' || (STATE.cursos && STATE.cursos.length)) {
+    // Com filtro de TIPO e/ou CURSO: usa as campanhas já filtradas (por curso/período)
+    // e pega a fatia desta fonte. (cursoMatchTipo é no-op quando tipo='all')
     getTodasCampanhasFiltradas()
       .filter(c => (c.cursos || []).some(cu => cursoMatchTipo(cu, STATE.tipoCurso)))
       .forEach(c => {
