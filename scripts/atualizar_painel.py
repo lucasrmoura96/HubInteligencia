@@ -72,6 +72,26 @@ ANO_FIM = 2026
 MIN_LEADS_RANKING = 100
 MIN_CUSTO_FUNDO_RANKING = 1.00
 
+# ----------------------------------------------------------------------------
+# ALIASES DE CURSO — Investimento → rótulo canônico do RD Station
+# ----------------------------------------------------------------------------
+# A base Investimento e o RD às vezes nomeiam o MESMO produto de formas diferentes.
+# Como o custo por curso é agregado pela coluna "Curso" de cada base, rótulos
+# divergentes fazem o investimento "não casar" e o curso aparece com R$ 0.
+# Este mapa normaliza o rótulo do Investimento para o nome usado no RD.
+# Confirmado com o cliente em 2026-06-11. Chave = rótulo no Investimento (exato).
+CURSO_ALIASES = {
+    "Simposio Brasileiro de Saude do Solo": "Simpósio Solo",
+    "Pós em Saúde dos Solos": "Pos Graduacao em Solos e Fertilidade do Solo",
+    "Congresso Nacional de Mulheres no Agro": "Congresso Nacional das Mulheres do Agronegócio",
+    "Imersão IA no Agro - LRV": "Imersão IA no Agro - Lucas do Rio Verde",
+}
+
+
+def aplica_alias_curso(serie: pd.Series) -> pd.Series:
+    """Substitui rótulos de curso conhecidos pelo nome canônico do RD."""
+    return serie.apply(lambda c: CURSO_ALIASES.get(str(c).strip(), c) if pd.notna(c) else c)
+
 
 # ----------------------------------------------------------------------------
 # Utilidades
@@ -248,6 +268,8 @@ def carrega_bases():
     valida_schema(inv, "Investimento", ARQ_INV)
     inv["Data"] = pd.to_datetime(inv["Data"], errors="coerce")
     inv["Fonte_norm"] = inv["Fonte"].apply(normaliza_fonte_inv_para_rd)
+    # Normaliza rótulos de curso divergentes (Investimento → RD) para o custo casar
+    inv["Curso"] = aplica_alias_curso(inv["Curso"])
 
     log("Lendo RD Station V2...")
     rd = pd.read_excel(ARQ_RD)
