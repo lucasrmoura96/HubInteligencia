@@ -1317,6 +1317,25 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; line-height: 1.05; letter-spacing:
 /* (Telas estreitas usam o layout BASE empilhado definido acima — sem override.) */
 
 /* ============================================================
+   TOPO = AZUL (accent) · FUNDO = VERDE (brand)
+   Quando a aba Topo está ativa (body[data-mkt-tab="topo"]), as tabs
+   e os botões de Tipo usam o mesmo azul dos cards/charts de Topo.
+   ============================================================ */
+body[data-mkt-tab="topo"] .tab-funnel::before,
+body[data-mkt-tab="topo"] .filter-type .ft-btn::before {
+  background: linear-gradient(135deg, var(--accent-500), var(--accent-700));
+}
+body[data-mkt-tab="topo"] .tab-funnel:hover { border-color: var(--accent-500); }
+body[data-mkt-tab="topo"] .tab-funnel.active {
+  border-color: var(--accent-500);
+  box-shadow: 0 8px 22px rgba(31, 91, 164, 0.30);
+}
+body[data-mkt-tab="topo"] .tab-funnel:focus-visible { box-shadow: 0 0 0 4px rgba(31, 91, 164, 0.25); }
+body[data-mkt-tab="topo"] .filter-type .ft-btn.active { box-shadow: 0 4px 14px rgba(31, 91, 164, 0.25); }
+body[data-mkt-tab="topo"] .filter-type .ft-btn:focus-visible { box-shadow: 0 0 0 4px rgba(31, 91, 164, 0.2); }
+body[data-mkt-tab="topo"] .fchip.is-tipo { border-color: var(--accent-500); }
+
+/* ============================================================
    TOGGLE DE VISÃO TEMPORAL (evento × origem) — minimalista
    ============================================================ */
 .visao-toggle {

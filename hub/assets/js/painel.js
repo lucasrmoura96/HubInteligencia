@@ -3164,6 +3164,8 @@ function renderAll() {
     console.warn('renderAll abortado — STATE.data ausente. Rode "Atualizar HUB MKT.bat".');
     return;
   }
+  // Hook de cor: Topo = azul (accent), Fundo = verde (brand) — usado no CSS dos botões
+  document.body.dataset.mktTab = STATE.tab;
   renderChipsMkt();             // chips do filtro ativo (resumo do recorte)
   renderTickerMkt();            // ticker de destaques (superlativos por curso/dia)
   renderSelectionBanner();
