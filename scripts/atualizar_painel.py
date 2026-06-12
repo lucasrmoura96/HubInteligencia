@@ -61,6 +61,13 @@ ARQ_ATIV = encontra_xlsx("Atividades B2C Pipedrive")
 ARQ_NEG = encontra_xlsx("Negócios B2C Pipedrive")
 ARQ_INV = encontra_xlsx("Investimento Gerenciadores Mkt")
 ARQ_RD = encontra_xlsx("RD Station V2")
+# DE-PARA (opcional): traz a classificação por Identificador (Grupo/Curso/Conteúdo).
+# Usado para (a) preencher Grupo/Curso de leads sem classificação e (b) anexar o
+# Conteúdo (Live/Masterclass/Ebook/Outros), que NÃO vem no export do RD.
+try:
+    ARQ_DEPARA = encontra_xlsx("DE_PARA")
+except Exception:
+    ARQ_DEPARA = None
 
 # Período padrão do painel
 ANO_INI = 2025
@@ -91,6 +98,73 @@ CURSO_ALIASES = {
 def aplica_alias_curso(serie: pd.Series) -> pd.Series:
     """Substitui rótulos de curso conhecidos pelo nome canônico do RD."""
     return serie.apply(lambda c: CURSO_ALIASES.get(str(c).strip(), c) if pd.notna(c) else c)
+
+
+def categoriza_conteudo(v) -> str:
+    """Normaliza o 'Conteúdo' da DE-PARA nas categorias do filtro de Topo.
+    Live → 'Live' · Masterclass → 'Masterclass' · Ebook → 'Ebook' · resto → 'Outros'.
+    """
+    s = str(v).strip().lower()
+    if s == "live":
+        return "Live"
+    if s == "masterclass":
+        return "Masterclass"
+    if s in ("ebook", "e-book"):
+        return "Ebook"
+    return "Outros"
+
+
+def carrega_depara_identificadores():
+    """Lê a aba RD_Identificadores da DE-PARA → dict ident -> (grupo, curso, conteudo_cat).
+    Retorna {} se a DE-PARA não existir.
+    """
+    if not ARQ_DEPARA:
+        log("[aviso] DE-PARA não encontrada em bases/ — Conteúdo ficará 'Outros' e leads sem Grupo não serão reclassificados.")
+        return {}
+    try:
+        dp = pd.read_excel(ARQ_DEPARA, sheet_name="RD_Identificadores")
+        dp.columns = [str(c).strip() for c in dp.columns]
+        col_cont = "Conteúdo" if "Conteúdo" in dp.columns else ("Conteudo" if "Conteudo" in dp.columns else None)
+        mapa = {}
+        for _, r in dp.iterrows():
+            de = str(r.get("De", "")).strip()
+            if not de or de.lower() == "nan":
+                continue
+            grupo = r.get("Grupo")
+            curso = r.get("Curso")
+            cont = categoriza_conteudo(r.get(col_cont)) if col_cont else "Outros"
+            mapa[de] = (
+                str(grupo).strip() if pd.notna(grupo) else None,
+                str(curso).strip() if pd.notna(curso) else None,
+                cont,
+            )
+        log(f"DE-PARA: {len(mapa)} identificadores carregados (Grupo/Curso/Conteúdo).")
+        return mapa
+    except Exception as e:
+        log(f"[aviso] Falha ao ler DE-PARA ({e}); Conteúdo ficará 'Outros'.")
+        return {}
+
+
+def aplica_depara_no_rd(rd: pd.DataFrame, mapa: dict) -> pd.DataFrame:
+    """Anexa coluna 'Conteudo' ao RD e preenche Grupo/Curso onde estão vazios,
+    usando o mapa Identificador→(Grupo, Curso, Conteúdo) da DE-PARA.
+    NÃO sobrescreve Grupo/Curso já classificados (só preenche vazios).
+    """
+    rd["Conteudo"] = "Outros"
+    if not mapa:
+        return rd
+    idents = rd["Identificador"].astype(str).str.strip()
+    rd["Conteudo"] = idents.map(lambda i: mapa[i][2] if i in mapa else "Outros")
+    # Preenche Grupo/Curso só onde está nulo (não perturba o que o RD já classificou)
+    g_na = rd["Grupo"].isna()
+    c_na = rd["Curso"].isna()
+    if g_na.any():
+        rd.loc[g_na, "Grupo"] = idents[g_na].map(lambda i: mapa[i][0] if i in mapa else None)
+    if c_na.any():
+        rd.loc[c_na, "Curso"] = idents[c_na].map(lambda i: mapa[i][1] if i in mapa else None)
+    n_reclass = int((g_na & rd["Grupo"].notna()).sum())
+    log(f"DE-PARA aplicada: {n_reclass} lead(s) sem Grupo foram reclassificados; Conteúdo anexado.")
+    return rd
 
 
 # ----------------------------------------------------------------------------
@@ -279,6 +353,8 @@ def carrega_bases():
     # Extrai utm_campaign e utm_content
     rd["utm_campaign"] = rd["Origem da Conversão - Detalhes"].apply(lambda s: extrai_utm(s, "campaign"))
     rd["utm_content"] = rd["Origem da Conversão - Detalhes"].apply(lambda s: extrai_utm(s, "content"))
+    # DE-PARA: anexa Conteúdo + preenche Grupo/Curso vazios (classificação por Identificador)
+    rd = aplica_depara_no_rd(rd, carrega_depara_identificadores())
 
     log(
         f"Bases carregadas: Ativ={len(ativ):,} | Neg={len(neg):,} | "
@@ -1973,6 +2049,57 @@ def motivos_perda(neg) -> dict:
     }
 
 
+def por_conteudo_mensal(rd: pd.DataFrame, inv: pd.DataFrame, grupo: str) -> list:
+    """Mês × Conteúdo (Live/Masterclass/Ebook/Outros): leads, mqls, custo.
+    Conteúdo do RD vem da DE-PARA (coluna 'Conteudo' anexada em aplica_depara_no_rd).
+    Custo da base Investimento (coluna 'Conteudo'), categorizado igual.
+    """
+    rd_g = rd[rd["Grupo"] == grupo].copy()
+    if "Conteudo" not in rd_g.columns:
+        return []
+    rd_g["AnoMes"] = rd_g["Data da Conversão"].dt.to_period("M").astype(str)
+    agg = rd_g.groupby(["AnoMes", "Conteudo"]).agg(
+        leads=("Index", "count"),
+        mqls=("Class", lambda x: (x == "MQL").sum()),
+    ).reset_index()
+    inv_g = inv[inv["Grupo"] == grupo].copy()
+    custo_mc = {}
+    if "Conteudo" in inv_g.columns and len(inv_g):
+        inv_g["AnoMes"] = inv_g["Data"].dt.to_period("M").astype(str)
+        inv_g["ContCat"] = inv_g["Conteudo"].map(categoriza_conteudo)
+        custo_mc = inv_g.groupby(["AnoMes", "ContCat"])["Custo"].sum().to_dict()
+    out = []
+    for _, r in agg.iterrows():
+        m = r["AnoMes"]; cont = r["Conteudo"]
+        try:
+            ano, mes = m.split("-"); ano, mes = int(ano), int(mes)
+        except Exception:
+            continue
+        out.append({
+            "ano": ano, "mes": mes, "conteudo": cont,
+            "leads": int(r["leads"]), "mqls": int(r["mqls"]),
+            "custo": round(float(custo_mc.get((m, cont), 0.0)), 2),
+        })
+    return out
+
+
+def por_conteudo_diario(rd: pd.DataFrame, grupo: str) -> list:
+    """Dia × Conteúdo: leads e mqls (gráfico MQLs por dia filtrável por conteúdo)."""
+    rd_g = rd[rd["Grupo"] == grupo].copy()
+    if "Conteudo" not in rd_g.columns:
+        return []
+    rd_g = rd_g[rd_g["Data da Conversão"].notna()].copy()
+    rd_g["data"] = rd_g["Data da Conversão"].dt.strftime("%Y-%m-%d")
+    agg = rd_g.groupby(["data", "Conteudo"]).agg(
+        leads=("Index", "count"),
+        mqls=("Class", lambda x: (x == "MQL").sum()),
+    ).reset_index()
+    return [
+        {"data": r["data"], "conteudo": r["Conteudo"], "leads": int(r["leads"]), "mqls": int(r["mqls"])}
+        for _, r in agg.iterrows()
+    ]
+
+
 # ----------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------
@@ -2037,6 +2164,10 @@ def main():
     log("Curso × Dia (painel MQLs diário filtrável)...")
     topo_por_curso_diario = por_curso_diario(rd, "Topo")
     fundo_por_curso_diario = por_curso_diario(rd, "Fundo")
+
+    log("Conteúdo × Mês/Dia (filtro Topo: Lives/Masterclass/Ebook/Outros)...")
+    topo_por_conteudo_mensal = por_conteudo_mensal(rd, inv, "Topo")
+    topo_por_conteudo_diario = por_conteudo_diario(rd, "Topo")
 
     log("Atribuindo tipo (MBA/Pós/Imersões) aos negócios — multi-camada...")
     neg_classificado = atribui_tipos_negocios(neg, rd)
@@ -2123,6 +2254,8 @@ def main():
             "por_curso_real": topo_por_curso_real,
             "por_curso_mensal": topo_por_curso_mensal,
             "por_curso_diario": topo_por_curso_diario,
+            "por_conteudo_mensal": topo_por_conteudo_mensal,
+            "por_conteudo_diario": topo_por_conteudo_diario,
             "por_tipo_mensal": topo_por_tipo_mensal,
             "mensal_origem": topo_mes_origem,
             "por_tipo_mensal_origem": topo_por_tipo_mensal_origem,

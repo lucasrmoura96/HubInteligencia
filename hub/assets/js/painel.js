@@ -9,7 +9,8 @@ const STATE = {
   // filtro.ano segue como string única ('all' ou ano).
   // filtro.range: quando setado ({ de: 'YYYY-MM-DD', ate: 'YYYY-MM-DD' }), substitui ano/mes/dia.
   filtro: { ano: 'all', mes: 'all', dia: 'all', range: null },
-  tipoCurso: 'all',         // all | mba | pos | imersoes
+  tipoCurso: 'all',         // all | mba | pos | imersoes  (filtro de TIPO no Fundo)
+  conteudo: 'all',          // all | Live | Masterclass | Ebook | Outros  (filtro de CONTEÚDO no Topo)
   cursos: [],               // multi-select de cursos específicos; vazio = todos
   visaoOrigem: false,       // false = data do evento (padrão); true = data de conversão de origem
   mqlView: 'diario',        // 'diario' (dia a dia) | 'mensal' (todos os meses do ano filtrado)
@@ -165,7 +166,8 @@ function renderChipsMkt() {
   const chips = [];
   const per = mktPeriodoLabel();
   if (per) chips.push({ k:'Período', v: per, rem:'periodo' });
-  if (STATE.tipoCurso !== 'all') chips.push({ k:'Tipo', v: ({mba:'MBA',pos:'Pós',imersoes:'Imersões'})[STATE.tipoCurso] || STATE.tipoCurso, rem:'tipo', cls:'is-tipo' });
+  if (STATE.tab === 'fundo' && STATE.tipoCurso !== 'all') chips.push({ k:'Tipo', v: ({mba:'MBA',pos:'Pós',imersoes:'Imersões'})[STATE.tipoCurso] || STATE.tipoCurso, rem:'tipo', cls:'is-tipo' });
+  if (STATE.tab === 'topo' && STATE.conteudo !== 'all') chips.push({ k:'Conteúdo', v: ({Live:'Lives'})[STATE.conteudo] || STATE.conteudo, rem:'conteudo', cls:'is-tipo' });
   if (STATE.cursos && STATE.cursos.length) chips.push({ k:'Curso', v: STATE.cursos.length === 1 ? STATE.cursos[0] : `${STATE.cursos.length} cursos`, rem:'cursos', cls:'is-sel' });
   if (!chips.length) { host.innerHTML = ''; return; }
   host.innerHTML = `<span class="fc-lead">Filtros</span>` +
@@ -175,7 +177,8 @@ function renderChipsMkt() {
     btn.onclick = () => {
       const rem = btn.closest('.fchip').dataset.rem;
       if (rem === 'periodo') resetPeriodoMkt();
-      else if (rem === 'tipo') { STATE.tipoCurso = 'all'; document.querySelectorAll('.ft-btn').forEach(x => x.classList.toggle('active', x.dataset.tipo === 'all')); }
+      else if (rem === 'tipo') { STATE.tipoCurso = 'all'; renderTipoFiltro(); }
+      else if (rem === 'conteudo') { STATE.conteudo = 'all'; renderTipoFiltro(); }
       else if (rem === 'cursos') { STATE.cursos = []; MS_INSTANCES.curso && MS_INSTANCES.curso.setValores([]); }
       renderAll();
     };
@@ -366,6 +369,9 @@ function renderTabs() {
     b.addEventListener('click', () => {
       STATE.tab = b.dataset.tab;
       STATE.selecao = null;
+      // Filtros de Tipo (Fundo) e Conteúdo (Topo) são exclusivos por aba — zera ao trocar
+      STATE.tipoCurso = 'all';
+      STATE.conteudo = 'all';
       document.querySelectorAll('.tab-funnel').forEach(x => x.classList.toggle('active', x.dataset.tab === STATE.tab));
       setupFiltros();
       renderAll();
@@ -686,6 +692,9 @@ function setupFiltros() {
   document.getElementById('btnClear').onclick = () => {
     STATE.filtro = { ano:'all', mes:'all', dia:'all', range: null };
     STATE.cursos = [];
+    STATE.tipoCurso = 'all';
+    STATE.conteudo = 'all';
+    renderTipoFiltro();
     selAno.value = 'all';
     MS_INSTANCES.mes && MS_INSTANCES.mes.setValores([]);
     MS_INSTANCES.dia && MS_INSTANCES.dia.setValores([]);
@@ -702,16 +711,10 @@ function setupFiltros() {
   };
 
   // ============================================================
-  // Filtros de TIPO de curso (MBA, Pós, Imersões)
+  // Filtro de TIPO (Fundo: MBA/Pós/Imersões) ou CONTEÚDO (Topo: Lives/Masterclass/Ebook/Outros)
+  // Botões são montados dinamicamente conforme a aba ativa.
   // ============================================================
-  document.querySelectorAll('.ft-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.tipo === STATE.tipoCurso);
-    b.onclick = () => {
-      STATE.tipoCurso = b.dataset.tipo;
-      document.querySelectorAll('.ft-btn').forEach(x => x.classList.toggle('active', x.dataset.tipo === STATE.tipoCurso));
-      renderAll();
-    };
-  });
+  renderTipoFiltro();
 
   // ============================================================
   // Toggle de VISÃO temporal (evento × origem)
@@ -732,6 +735,31 @@ function setupFiltros() {
   }
 }
 function clearPresets() { document.querySelectorAll('.preset').forEach(b => b.classList.remove('active')); }
+
+// Config do filtro de Tipo/Conteúdo por aba
+const TIPO_FILTRO_CFG = {
+  fundo: { label: 'Tipo', state: 'tipoCurso', opts: [['all','Tudo'],['mba','MBA'],['pos','Pós'],['imersoes','Imersões']] },
+  topo:  { label: 'Conteúdo', state: 'conteudo', opts: [['all','Tudo'],['Live','Lives'],['Masterclass','Masterclass'],['Ebook','Ebook'],['Outros','Outros']] },
+};
+// Monta os botões de Tipo (Fundo) ou Conteúdo (Topo) conforme a aba ativa
+function renderTipoFiltro() {
+  const cfg = TIPO_FILTRO_CFG[STATE.tab] || TIPO_FILTRO_CFG.fundo;
+  const lbl = document.querySelector('.filter-type .ft-label');
+  if (lbl) lbl.textContent = cfg.label;
+  const wrap = document.querySelector('.filter-type .ft-buttons');
+  if (!wrap) return;
+  const cur = STATE[cfg.state] || 'all';
+  wrap.innerHTML = cfg.opts.map(([v, t]) =>
+    `<button class="ft-btn${v === cur ? ' active' : ''}" data-val="${escapeHtml(v)}">${escapeHtml(t)}</button>`
+  ).join('');
+  wrap.querySelectorAll('.ft-btn').forEach(b => {
+    b.onclick = () => {
+      STATE[cfg.state] = b.dataset.val;
+      wrap.querySelectorAll('.ft-btn').forEach(x => x.classList.toggle('active', x.dataset.val === STATE[cfg.state]));
+      renderAll();
+    };
+  });
+}
 
 // ============================================================
 // FUNIL DE TOPO — Helper de filtro temporal
@@ -783,6 +811,28 @@ function calcKpisFiltrados() {
   const cursosFiltro = STATE.cursos && STATE.cursos.length;
 
   if (STATE.selecao) return calcKpisSelecao();
+
+  // ============================================================
+  // TOPO: filtro por CONTEÚDO (Live/Masterclass/Ebook/Outros)
+  // Agrega leads/mqls/custo via por_conteudo_mensal. Reuniões/Vendas não
+  // são separáveis por conteúdo (assistência é por pessoa) → ficam "—".
+  // ============================================================
+  if (STATE.tab === 'topo' && STATE.conteudo && STATE.conteudo !== 'all') {
+    const rows = (tab.por_conteudo_mensal || []).filter(r =>
+      r.conteudo === STATE.conteudo && tupleAtivo(r.ano, r.mes)
+    );
+    const acc = rows.reduce((a, c) => ({
+      leads: a.leads + c.leads, mqls: a.mqls + c.mqls, custo: a.custo + (c.custo || 0),
+    }), { leads: 0, mqls: 0, custo: 0 });
+    return {
+      ...acc, reunioes: null, ganhos: null, faturamento: null,
+      pct_mql: acc.leads ? (acc.mqls / acc.leads * 100) : 0,
+      pct_mql_reuniao: 0, pct_reuniao_ganho: 0,
+      cpl: acc.leads ? (acc.custo / acc.leads) : 0,
+      cpmql: acc.mqls ? (acc.custo / acc.mqls) : 0,
+      cpr: 0, ticket_medio: 0, roas: 0, cac: 0,
+    };
+  }
 
   // ============================================================
   // Filtro de CURSO individual (multi-select) — agrega via por_curso_mensal
@@ -1122,6 +1172,7 @@ function calcKpisPeriodo({ ano, mes, diaInicio = null, diaFim = null }) {
 function calcKpisMesAnterior() {
   if (STATE.selecao) return null;
   if (STATE.cursos && STATE.cursos.length) return null; // filtro de curso individual → desabilita MoM
+  if (STATE.tab === 'topo' && STATE.conteudo !== 'all') return null; // filtro de conteúdo → desabilita MoM
   if (STATE.filtro.range) return null;                  // range customizado → desabilita MoM
 
   const { ano } = STATE.filtro;
@@ -1163,6 +1214,7 @@ function calcKpisMesAnterior() {
 function momLabel() {
   if (STATE.selecao) return null;
   if (STATE.cursos && STATE.cursos.length) return null;
+  if (STATE.tab === 'topo' && STATE.conteudo !== 'all') return null;
   if (STATE.filtro.range) return null;
   const { ano } = STATE.filtro;
   const mesesSel = mesesSelecionados();
@@ -1183,6 +1235,7 @@ function momLabel() {
 function calcKpisAnoAnterior() {
   if (STATE.selecao) return null;
   if (STATE.cursos && STATE.cursos.length) return null;
+  if (STATE.tab === 'topo' && STATE.conteudo !== 'all') return null;
   if (STATE.filtro.range) return null;
 
   const { ano } = STATE.filtro;
@@ -1261,6 +1314,7 @@ function calcKpisAnoAnterior() {
 function yoyLabel() {
   if (STATE.selecao) return null;
   if (STATE.cursos && STATE.cursos.length) return null;
+  if (STATE.tab === 'topo' && STATE.conteudo !== 'all') return null;
   if (STATE.filtro.range) return null;
   const { ano } = STATE.filtro;
   const mesesSel = mesesSelecionados();
@@ -1665,6 +1719,7 @@ function renderFunil() {
   const wrap = document.getElementById('funilCard');
   if (STATE.selecao) { wrap.classList.add('hidden'); return; }
   if (STATE.tipoCurso !== 'all') { wrap.classList.add('hidden'); return; }
+  if (STATE.tab === 'topo' && STATE.conteudo !== 'all') { wrap.classList.add('hidden'); return; }
   wrap.classList.remove('hidden');
 
   // CONSTRÓI o funil baseado nos KPIs filtrados (não no JSON estático)
@@ -1944,6 +1999,20 @@ function getDiarioFiltrado() {
   const temCurso = STATE.cursos && STATE.cursos.length;
   const temTipo = STATE.tipoCurso !== 'all';
 
+  // TOPO: filtro por CONTEÚDO → usa por_conteudo_diario
+  if (STATE.tab === 'topo' && STATE.conteudo && STATE.conteudo !== 'all') {
+    const acc = new Map();
+    for (const r of (tab.por_conteudo_diario || [])) {
+      if (r.conteudo !== STATE.conteudo) continue;
+      if (!dataIsoAtiva(r.data)) continue;
+      let A = acc.get(r.data); if (!A) { A = { leads: 0, mqls: 0 }; acc.set(r.data, A); }
+      A.leads += r.leads || 0; A.mqls += r.mqls || 0;
+    }
+    const out = Array.from(acc, ([data, v]) => ({ data, leads: v.leads, mqls: v.mqls }));
+    out.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
+    return out;
+  }
+
   let linhas;
   if (temCurso || temTipo) {
     // Precisa do breakdown por curso (por_curso_diario)
@@ -1985,7 +2054,13 @@ function getMensalFiltrado() {
     let A = acc.get(ym); if (!A) { A = { leads: 0, mqls: 0 }; acc.set(ym, A); }
     A.leads += leads || 0; A.mqls += mqls || 0;
   };
-  if (temCurso || temTipo) {
+  if (STATE.tab === 'topo' && STATE.conteudo && STATE.conteudo !== 'all') {
+    for (const r of (tab.por_conteudo_diario || [])) {
+      if (r.conteudo !== STATE.conteudo) continue;
+      if (!anoOk(r.data)) continue;
+      add(r.data, r.leads, r.mqls);
+    }
+  } else if (temCurso || temTipo) {
     for (const r of (tab.por_curso_diario || [])) {
       if (!cursoAtivo(r.curso)) continue;
       if (!cursoMatchTipo(r.curso, STATE.tipoCurso)) continue;
@@ -3188,6 +3263,7 @@ function renderEmptyStateBanner() {
   let banner = document.getElementById(id);
   const k = calcKpisFiltrados();
   const hasFiltro = !nenhumFiltroTemporal() || STATE.tipoCurso !== 'all'
+                 || (STATE.tab === 'topo' && STATE.conteudo !== 'all')
                  || (STATE.cursos && STATE.cursos.length > 0);
   const zerado = (!k.leads && !k.mqls && !k.custo);
 
