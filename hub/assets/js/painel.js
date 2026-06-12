@@ -804,6 +804,29 @@ function getPorTipoMensal() {
   return (STATE.visaoOrigem && tab.por_tipo_mensal_origem) ? tab.por_tipo_mensal_origem : tab.por_tipo_mensal;
 }
 
+// Há granularidade DIÁRIA ativa? (dia(s) específicos selecionados ou range custom)
+function temFiltroDiario() {
+  const ds = diasSelecionados();
+  return (!!ds && ds.length > 0) || !!STATE.filtro.range;
+}
+// leads/mqls/custo por DIA via por_curso_diario, para os cursos que casam o filtro.
+// Usado quando há dia(s)/range + Tipo/Curso (por_curso_mensal NÃO tem dia → ignoraria o dia).
+// Custo do dia é estimado proporcionalmente: custo mensal do curso ÷ dias do mês.
+function aggCursoDiario(matchTipoFn) {
+  const tab = STATE.data[STATE.tab];
+  const custoMC = {};
+  (tab.por_curso_mensal || []).forEach(r => { custoMC[r.curso + '|' + r.ano + '-' + r.mes] = r.custo || 0; });
+  let leads = 0, mqls = 0, custo = 0;
+  (tab.por_curso_diario || []).forEach(r => {
+    if (!cursoAtivo(r.curso) || !matchTipoFn(r.curso) || !dataIsoAtiva(r.data)) return;
+    leads += r.leads || 0; mqls += r.mqls || 0;
+    const p = String(r.data).split('-'); const y = +p[0], m = +p[1];
+    const dim = new Date(y, m, 0).getDate();
+    custo += dim ? (custoMC[r.curso + '|' + y + '-' + m] || 0) / dim : 0;
+  });
+  return { leads, mqls, custo: Number(custo.toFixed(2)) };
+}
+
 function calcKpisFiltrados() {
   const tab = STATE.data[STATE.tab];
   const { ano, mes, dia } = STATE.filtro;
@@ -839,15 +862,16 @@ function calcKpisFiltrados() {
   // Vale para qualquer tipo (all/mba/pos/imersoes)
   // ============================================================
   if (cursosFiltro && tab.por_curso_mensal && tab.por_curso_mensal.length) {
-    const rows = tab.por_curso_mensal.filter(r =>
-      tupleAtivo(r.ano, r.mes) && cursoAtivo(r.curso) &&
-      cursoMatchTipo(r.curso, tipo)
-    );
-    const acc = rows.reduce((a, c) => ({
-      leads: a.leads + c.leads,
-      mqls:  a.mqls  + c.mqls,
-      custo: a.custo + c.custo,
-    }), { leads: 0, mqls: 0, custo: 0 });
+    // Com dia(s)/range → agrega via diário (respeita o dia). Senão → mensal.
+    const acc = temFiltroDiario()
+      ? aggCursoDiario(c => cursoMatchTipo(c, tipo))
+      : tab.por_curso_mensal.filter(r =>
+          tupleAtivo(r.ano, r.mes) && cursoAtivo(r.curso) && cursoMatchTipo(r.curso, tipo)
+        ).reduce((a, c) => ({
+          leads: a.leads + c.leads,
+          mqls:  a.mqls  + c.mqls,
+          custo: a.custo + c.custo,
+        }), { leads: 0, mqls: 0, custo: 0 });
     // Reuniões/Ganhos/Faturamento: difícil derivar por curso individual sem nova base.
     // Mantém null (apresenta como "—" nas KPIs)
     const custo = acc.custo;
@@ -867,9 +891,13 @@ function calcKpisFiltrados() {
   //   - por_tipo_mensal  (tipo × mês)   → reuniões, ganhos, faturamento (via Negócio - Produto de Interesse)
   // E deriva ROAS/CAC/Ticket/CPR a partir desses valores.
   if (tipo !== 'all') {
+    const diario = temFiltroDiario();
     // === Lead, MQL, Custo: vem do agregado por curso ===
     let leadsMqlsCusto;
-    if (tab.por_curso_mensal && tab.por_curso_mensal.length) {
+    if (diario) {
+      // Com dia(s)/range → agrega via diário (respeita o dia)
+      leadsMqlsCusto = aggCursoDiario(c => cursoMatchTipo(c, tipo));
+    } else if (tab.por_curso_mensal && tab.por_curso_mensal.length) {
       // Respeita ano/mes (multi) + filtro de curso individual + tipo
       let rows = tab.por_curso_mensal
         .filter(r => tupleAtivo(r.ano, r.mes) && cursoAtivo(r.curso))
@@ -891,9 +919,10 @@ function calcKpisFiltrados() {
       }), { leads: 0, mqls: 0, custo: 0 });
     }
 
-    // === Reuniões, Ganhos, Faturamento: vem do agregado por tipo ===
+    // === Reuniões, Ganhos, Faturamento: vem do agregado por tipo (mensal) ===
+    // Com filtro DIÁRIO não dá pra separar por dia → fica null (mostra "—").
     let financeiro = { reunioes: null, ganhos: null, faturamento: null };
-    const ptm = getPorTipoMensal();
+    const ptm = diario ? null : getPorTipoMensal();
     if (ptm && ptm.length) {
       let rowsT = ptm
         .filter(r => r.tipo === tipo)
