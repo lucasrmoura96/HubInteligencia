@@ -114,6 +114,21 @@ def categoriza_conteudo(v) -> str:
     return "Outros"
 
 
+def categoriza_por_curso(curso) -> str:
+    """Fallback quando o 'Conteúdo' está vazio: deriva a categoria do NOME do curso
+    (os eventos são nomeados 'Live - …', 'Masterclass - …', '… Ebook/Guia'). Conservador:
+    só classifica nas 3 palavras-chave; o resto fica 'Outros'.
+    """
+    s = str(curso).strip().lower()
+    if "live" in s:
+        return "Live"
+    if "masterclass" in s:
+        return "Masterclass"
+    if "ebook" in s or "e-book" in s:
+        return "Ebook"
+    return "Outros"
+
+
 def carrega_depara_identificadores():
     """Lê a aba RD_Identificadores da DE-PARA → dict ident -> (grupo, curso, conteudo_cat).
     Retorna {} se a DE-PARA não existir.
@@ -133,6 +148,9 @@ def carrega_depara_identificadores():
             grupo = r.get("Grupo")
             curso = r.get("Curso")
             cont = categoriza_conteudo(r.get(col_cont)) if col_cont else "Outros"
+            # Fallback: se o Conteúdo está vazio, deriva do nome do curso (Live/Masterclass/Ebook)
+            if cont == "Outros":
+                cont = categoriza_por_curso(curso)
             mapa[de] = (
                 str(grupo).strip() if pd.notna(grupo) else None,
                 str(curso).strip() if pd.notna(curso) else None,
