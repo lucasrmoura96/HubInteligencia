@@ -2759,6 +2759,7 @@ function findCriativo(camp, cr) {
 // ============================================================
 const TABLE_STATE = {
   abertos: { curso: new Set(), campanha: new Set(), canal: new Set() },
+  lastExpandKey: null,  // chave da última seleção já auto-expandida (evita re-abrir a cada render)
 };
 
 // Ordena um array de linhas (curso/campanha/fonte/criativo) pela coluna ativa da Galeria
@@ -2784,26 +2785,32 @@ function renderTabelaHierarquica() {
   }
   const q = normalize(STATE.busca.tabela);
 
-  // Se há seleção de criativo, expandir automaticamente o caminho (Curso → Campanha → Canal)
-  if (STATE.selecao && STATE.selecao.tipo === 'criativo') {
-    const camp = findCampanhaCompleta(STATE.selecao.campanha);
-    if (camp) {
-      // Acha o curso real (procura nas próprias campanhas)
-      (camp.cursos || []).forEach(cu => TABLE_STATE.abertos.curso.add(cu));
-      TABLE_STATE.abertos.campanha.add(camp.campanha);
-      // Acha qual fonte tem esse criativo
-      const f = (camp.fontes || []).find(fo => (fo.criativos || []).some(c => c.criativo === STATE.selecao.valor));
-      if (f) TABLE_STATE.abertos.canal.add(`${camp.campanha}::${f.fonte}`);
+  // Expande o caminho até a seleção (Curso → Campanha → Canal) APENAS quando a seleção
+  // MUDA — não a cada render. Senão o curso re-abriria sozinho e o usuário nunca
+  // conseguiria recolher o drilldown (bug do MEA e afins).
+  const selKey = STATE.selecao
+    ? `${STATE.selecao.tipo}|${STATE.selecao.valor}|${STATE.selecao.campanha || ''}`
+    : null;
+  if (selKey && selKey !== TABLE_STATE.lastExpandKey) {
+    if (STATE.selecao.tipo === 'criativo') {
+      const camp = findCampanhaCompleta(STATE.selecao.campanha);
+      if (camp) {
+        (camp.cursos || []).forEach(cu => TABLE_STATE.abertos.curso.add(cu));
+        TABLE_STATE.abertos.campanha.add(camp.campanha);
+        const f = (camp.fontes || []).find(fo => (fo.criativos || []).some(c => c.criativo === STATE.selecao.valor));
+        if (f) TABLE_STATE.abertos.canal.add(`${camp.campanha}::${f.fonte}`);
+      }
+    } else if (STATE.selecao.tipo === 'campanha') {
+      const camp = findCampanhaCompleta(STATE.selecao.valor);
+      if (camp) {
+        (camp.cursos || []).forEach(cu => TABLE_STATE.abertos.curso.add(cu));
+        TABLE_STATE.abertos.campanha.add(camp.campanha);
+      }
+    } else if (STATE.selecao.tipo === 'curso') {
+      TABLE_STATE.abertos.curso.add(STATE.selecao.valor);
     }
-  } else if (STATE.selecao && STATE.selecao.tipo === 'campanha') {
-    const camp = findCampanhaCompleta(STATE.selecao.valor);
-    if (camp) {
-      (camp.cursos || []).forEach(cu => TABLE_STATE.abertos.curso.add(cu));
-      TABLE_STATE.abertos.campanha.add(camp.campanha);
-    }
-  } else if (STATE.selecao && STATE.selecao.tipo === 'curso') {
-    TABLE_STATE.abertos.curso.add(STATE.selecao.valor);
   }
+  TABLE_STATE.lastExpandKey = selKey;
 
   // Match: o filtro testa em qualquer nível (curso, campanha, canal, criativo)
   const matchCurso = (curso) => {
