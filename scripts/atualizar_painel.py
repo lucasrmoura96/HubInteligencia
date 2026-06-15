@@ -2118,6 +2118,48 @@ def por_conteudo_diario(rd: pd.DataFrame, grupo: str) -> list:
     ]
 
 
+def por_curso_fonte_mensal(rd: pd.DataFrame, inv: pd.DataFrame, grupo: str) -> list:
+    """Mês × Curso × Fonte: leads/mqls (RD) + custo (Investimento), com OUTER JOIN.
+    Inclui fontes que tiveram CUSTO mas 0 leads (e vice-versa) — corrige o caso em que
+    um canal pago (ex.: Google) teve investimento mas nenhum lead atribuído ao curso no
+    período (antes ficava invisível em 'Canais Pagos'). Estrutura:
+      [{ano, mes, curso, fonte, leads, mqls, custo}]
+    """
+    rd_g = rd[rd["Grupo"] == grupo].copy()
+    rd_g["AnoMes"] = rd_g["Data da Conversão"].dt.to_period("M").astype(str)
+    agg = rd_g.groupby(["AnoMes", "Curso", "Fonte"]).agg(
+        leads=("Index", "count"),
+        mqls=("Class", lambda x: (x == "MQL").sum()),
+    ).reset_index().rename(columns={"Fonte": "fonte"})
+
+    inv_g = inv[inv["Grupo"] == grupo].copy()
+    inv_g["AnoMes"] = inv_g["Data"].dt.to_period("M").astype(str)
+    # Fonte_norm padroniza 'Meta'→'Meta Ads' etc. (mesma chave do RD)
+    custo = inv_g.groupby(["AnoMes", "Curso", "Fonte_norm"])["Custo"].sum().reset_index()
+    custo = custo.rename(columns={"Fonte_norm": "fonte", "Custo": "custo"})
+
+    merged = pd.merge(agg, custo, on=["AnoMes", "Curso", "fonte"], how="outer")
+    out = []
+    for _, r in merged.iterrows():
+        m = r["AnoMes"]; curso = r["Curso"]
+        if pd.isna(curso) or pd.isna(m):
+            continue
+        try:
+            ano, mes = m.split("-"); ano, mes = int(ano), int(mes)
+        except Exception:
+            continue
+        leads = int(r["leads"]) if pd.notna(r["leads"]) else 0
+        mqls = int(r["mqls"]) if pd.notna(r["mqls"]) else 0
+        custo_v = float(r["custo"]) if pd.notna(r["custo"]) else 0.0
+        if leads == 0 and mqls == 0 and round(custo_v, 2) == 0:
+            continue
+        out.append({
+            "ano": ano, "mes": mes, "curso": str(curso), "fonte": str(r["fonte"]),
+            "leads": leads, "mqls": mqls, "custo": round(custo_v, 2),
+        })
+    return out
+
+
 # ----------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------
@@ -2186,6 +2228,10 @@ def main():
     log("Conteúdo × Mês/Dia (filtro Topo: Lives/Masterclass/Ebook/Outros)...")
     topo_por_conteudo_mensal = por_conteudo_mensal(rd, inv, "Topo")
     topo_por_conteudo_diario = por_conteudo_diario(rd, "Topo")
+
+    log("Curso × Fonte × Mês (Canais Pagos por curso — inclui custo sem leads)...")
+    topo_por_curso_fonte_mensal = por_curso_fonte_mensal(rd, inv, "Topo")
+    fundo_por_curso_fonte_mensal = por_curso_fonte_mensal(rd, inv, "Fundo")
 
     log("Atribuindo tipo (MBA/Pós/Imersões) aos negócios — multi-camada...")
     neg_classificado = atribui_tipos_negocios(neg, rd)
@@ -2274,6 +2320,7 @@ def main():
             "por_curso_diario": topo_por_curso_diario,
             "por_conteudo_mensal": topo_por_conteudo_mensal,
             "por_conteudo_diario": topo_por_conteudo_diario,
+            "por_curso_fonte_mensal": topo_por_curso_fonte_mensal,
             "por_tipo_mensal": topo_por_tipo_mensal,
             "mensal_origem": topo_mes_origem,
             "por_tipo_mensal_origem": topo_por_tipo_mensal_origem,
@@ -2297,6 +2344,7 @@ def main():
             "por_curso_real": fundo_por_curso_real,
             "por_curso_mensal": fundo_por_curso_mensal,
             "por_curso_diario": fundo_por_curso_diario,
+            "por_curso_fonte_mensal": fundo_por_curso_fonte_mensal,
             "por_tipo_mensal": fundo_por_tipo_mensal,
             "mensal_origem": fundo_mes_origem,
             "por_tipo_mensal_origem": fundo_por_tipo_mensal_origem,

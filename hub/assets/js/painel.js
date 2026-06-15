@@ -3337,17 +3337,29 @@ function renderCanaisPagos() {
   let porFonteAgregado = [];
   const acc = {};
   if (STATE.tipoCurso !== 'all' || (STATE.cursos && STATE.cursos.length)) {
-    // Com filtro de TIPO e/ou CURSO: agrega fonte×campanha via campanhas (mesma fonte
-    // do funil/galeria), já filtradas por curso/período em getTodasCampanhasFiltradas.
-    // (cursoMatchTipo é no-op quando tipo='all', então só o filtro de curso atua)
-    getTodasCampanhasFiltradas()
-      .filter(c => (c.cursos || []).some(cu => cursoMatchTipo(cu, STATE.tipoCurso)))
-      .forEach(c => (c.fontes || []).forEach(f => {
-        if (!acc[f.fonte]) acc[f.fonte] = { label: f.fonte, leads: 0, mqls: 0, custo: 0 };
-        acc[f.fonte].leads += f.leads || 0;
-        acc[f.fonte].mqls  += f.mqls  || 0;
-        acc[f.fonte].custo += f.custo || 0;
-      }));
+    // Com filtro de TIPO e/ou CURSO: usa por_curso_fonte_mensal — custo vem da base de
+    // Investimento (por curso×fonte), então um canal pago com GASTO mas 0 leads atribuídos
+    // no período AINDA aparece (antes sumia, pois a árvore é orientada a leads).
+    const pcf = tab.por_curso_fonte_mensal;
+    if (pcf && pcf.length) {
+      pcf.forEach(r => {
+        if (!tupleAtivo(r.ano, r.mes) || !cursoAtivo(r.curso) || !cursoMatchTipo(r.curso, STATE.tipoCurso)) return;
+        if (!acc[r.fonte]) acc[r.fonte] = { label: r.fonte, leads: 0, mqls: 0, custo: 0 };
+        acc[r.fonte].leads += r.leads || 0;
+        acc[r.fonte].mqls  += r.mqls  || 0;
+        acc[r.fonte].custo += r.custo || 0;
+      });
+    } else {
+      // Fallback (dados antigos sem por_curso_fonte_mensal): árvore lead-driven
+      getTodasCampanhasFiltradas()
+        .filter(c => (c.cursos || []).some(cu => cursoMatchTipo(cu, STATE.tipoCurso)))
+        .forEach(c => (c.fontes || []).forEach(f => {
+          if (!acc[f.fonte]) acc[f.fonte] = { label: f.fonte, leads: 0, mqls: 0, custo: 0 };
+          acc[f.fonte].leads += f.leads || 0;
+          acc[f.fonte].mqls  += f.mqls  || 0;
+          acc[f.fonte].custo += f.custo || 0;
+        }));
+    }
   } else {
     const meses = (tab.por_fonte_mensal || []).filter(m => tupleAtivo(m.ano, m.mes));
     meses.forEach(m => (m.fontes || []).forEach(f => {
