@@ -2189,6 +2189,29 @@ def por_curso_fonte_mensal(rd: pd.DataFrame, inv: pd.DataFrame, grupo: str) -> l
     return out
 
 
+def por_curso_vendas_mensal(neg: pd.DataFrame) -> list:
+    """Curso × mês (do GANHO): vendas (ganhos) e faturamento. Curso via curso_do_negocio.
+    Não tem grupo topo/fundo — é o produto vendido. Usado no filtro de curso das KPIs
+    pra mostrar Matrículas/Faturamento por curso (antes ficava '—')."""
+    g = neg[neg["Negócio - Status"] == "Ganho"].copy()
+    g = g[g["Negócio - Ganho em"].notna()]
+    if not len(g):
+        return []
+    g["_curso"] = g.apply(curso_do_negocio, axis=1)
+    g["AnoMes"] = g["Negócio - Ganho em"].dt.to_period("M").astype(str)
+    g["_val"] = pd.to_numeric(g["Negócio - Valor"], errors="coerce").fillna(0.0)
+    agg = g.groupby(["AnoMes", "_curso"]).agg(vendas=("_curso", "count"), faturamento=("_val", "sum")).reset_index()
+    out = []
+    for _, r in agg.iterrows():
+        try:
+            ano, mes = r["AnoMes"].split("-"); ano, mes = int(ano), int(mes)
+        except Exception:
+            continue
+        out.append({"ano": ano, "mes": mes, "curso": str(r["_curso"]),
+                    "vendas": int(r["vendas"]), "faturamento": round(float(r["faturamento"]), 2)})
+    return out
+
+
 # ----------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------
@@ -2261,6 +2284,9 @@ def main():
     log("Curso × Fonte × Mês (Canais Pagos por curso — inclui custo sem leads)...")
     topo_por_curso_fonte_mensal = por_curso_fonte_mensal(rd, inv, "Topo")
     fundo_por_curso_fonte_mensal = por_curso_fonte_mensal(rd, inv, "Fundo")
+
+    log("Curso × Mês — vendas/faturamento (Negócio-Turma) p/ filtro de curso nas KPIs...")
+    por_curso_vendas = por_curso_vendas_mensal(neg)
 
     log("Atribuindo tipo (MBA/Pós/Imersões) aos negócios — multi-camada...")
     neg_classificado = atribui_tipos_negocios(neg, rd)
@@ -2350,6 +2376,7 @@ def main():
             "por_conteudo_mensal": topo_por_conteudo_mensal,
             "por_conteudo_diario": topo_por_conteudo_diario,
             "por_curso_fonte_mensal": topo_por_curso_fonte_mensal,
+            "por_curso_vendas_mensal": por_curso_vendas,
             "por_tipo_mensal": topo_por_tipo_mensal,
             "mensal_origem": topo_mes_origem,
             "por_tipo_mensal_origem": topo_por_tipo_mensal_origem,
@@ -2374,6 +2401,7 @@ def main():
             "por_curso_mensal": fundo_por_curso_mensal,
             "por_curso_diario": fundo_por_curso_diario,
             "por_curso_fonte_mensal": fundo_por_curso_fonte_mensal,
+            "por_curso_vendas_mensal": por_curso_vendas,
             "por_tipo_mensal": fundo_por_tipo_mensal,
             "mensal_origem": fundo_mes_origem,
             "por_tipo_mensal_origem": fundo_por_tipo_mensal_origem,

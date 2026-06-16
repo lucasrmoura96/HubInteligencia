@@ -878,17 +878,31 @@ function calcKpisFiltrados() {
           mqls:  a.mqls  + c.mqls,
           custo: a.custo + c.custo,
         }), { leads: 0, mqls: 0, custo: 0 });
-    // Reuniões/Ganhos/Faturamento: difícil derivar por curso individual sem nova base.
-    // Mantém null (apresenta como "—" nas KPIs)
+    // Vendas/Faturamento POR CURSO: de Negócios via Turma (por_curso_vendas_mensal).
+    // Só no recorte mensal/ano/tudo (não há venda-por-curso por DIA) → com dia fica null.
+    let ganhos = null, faturamento = null;
+    if (!temFiltroDiario() && tab.por_curso_vendas_mensal && tab.por_curso_vendas_mensal.length) {
+      let v = 0, f = 0;
+      tab.por_curso_vendas_mensal.forEach(r => {
+        if (cursoAtivo(r.curso) && cursoMatchTipo(r.curso, tipo) && tupleAtivo(r.ano, r.mes)) {
+          v += r.vendas || 0; f += r.faturamento || 0;
+        }
+      });
+      ganhos = v; faturamento = f;
+    }
+    // Reuniões por curso individual não disponível (Atividades não tem curso) → null.
     const custo = acc.custo;
     return {
       ...acc,
-      reunioes: null, ganhos: null, faturamento: null,
+      reunioes: null, ganhos, faturamento,
       pct_mql: acc.leads ? (acc.mqls/acc.leads*100) : 0,
       pct_mql_reuniao: 0, pct_reuniao_ganho: 0,
       cpl:   acc.leads ? (custo/acc.leads) : 0,
       cpmql: acc.mqls  ? (custo/acc.mqls)  : 0,
-      cpr: 0, ticket_medio: 0, roas: 0, cac: 0,
+      cpr: 0,
+      ticket_medio: (ganhos) ? (faturamento/ganhos) : 0,
+      roas: (custo && faturamento != null) ? (faturamento/custo) : 0,
+      cac:  (ganhos) ? (custo/ganhos) : 0,
     };
   }
 
