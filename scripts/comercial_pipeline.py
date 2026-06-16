@@ -82,6 +82,18 @@ def curso_do_negocio(row):
             return NEGOCIO_CURSO_ALIASES.get(nome, nome)
     return "(sem produto)"
 
+# Consolidação (mesma do MKT, 2026-06-15): edições MT unificadas + descontinuados removidos.
+RD_CURSO_RENAME = {
+    "Imersão IA no Agro - Lucas do Rio Verde": "Imersão IA no Agro [MT]",
+    "Imersão IA no Agro - Sorriso": "Imersão IA no Agro [MT]",
+    "Imersão IA no Agro - SOR": "Imersão IA no Agro [MT]",
+}
+CURSOS_REMOVER = {"Teste", "Data Science"}
+
+def _removido(curso):
+    c = str(curso).strip()
+    return c in CURSOS_REMOVER or c.lower().startswith("expert")  # remove todos os Experts (descontinuados)
+
 # ---------- E-mail (chave de cruzamento RD <-> Pipedrive) ----------
 def norm_email(x):
     s = str(x if x is not None else '').strip().lower()
@@ -157,6 +169,14 @@ def main():
     neg["is_aberto"] = neg["Negócio - Status"] == "Aberto"
     neg["is_quali_ok"] = neg["Negócio - Qualificação/Feedback:"].isin(QUALI_OK)
     neg["_ciclo"] = (neg["_ganho"] - neg["_criado"]).dt.days
+
+    # Curso do negócio (cascata Turma→Curso→Nome do produto) + consolidação.
+    # Feito AQUI (antes dos KPIs) p/ que TODOS os números já excluam os descontinuados.
+    neg["_curso"] = neg.apply(curso_do_negocio, axis=1)
+    neg["_curso"] = neg["_curso"].map(lambda c: RD_CURSO_RENAME.get(c, c))
+    _antes = len(neg)
+    neg = neg[~neg["_curso"].map(_removido)].copy()
+    log(f"Consolidação curso: {_antes - len(neg)} negócio(s) removido(s) (Experts/Data Science/Teste).")
     # Reunião Qualificada = negócio qualificado (OK) que teve reunião concluída
     neg["is_rq"] = neg["is_quali_ok"] & neg["tem_reuniao"]
 
@@ -295,8 +315,7 @@ def main():
     # ============================================================
     # Cruzamento MQL->SDR (e-mail RD<->Pipedrive) + Qualidade (RQ->Venda) + Detalhe
     # ============================================================
-    # Curso do negócio (cascata Turma→Curso→Nome do produto; nunca Produto de Interesse)
-    neg["_curso"] = neg.apply(curso_do_negocio, axis=1)
+    # (neg["_curso"] + consolidação já aplicados lá em cima, antes dos KPIs)
     # Mapas por Negócio-ID (chave int)
     id_ganho = {int(nid): bool(g) for nid, g in zip(neg["Negócio - ID"], neg["is_ganho"]) if pd.notna(nid)}
     id_valor = {int(nid): float(v or 0.0) for nid, v in zip(neg["Negócio - ID"], neg["valor"]) if pd.notna(nid)}
