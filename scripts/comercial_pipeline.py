@@ -60,7 +60,7 @@ NEGOCIO_CURSO_ALIASES = {
     "Pós graduação em Fertilidade e Saúde do Solo": "Pos Graduacao em Solos e Fertilidade do Solo",
     "Expert Soja e Milho": "Expert em Soja e Milho",
     "Simpósio Brasileiro De Saúde do Solo": "Simpósio Solo",
-    "Imersão IA no Agro [MT]": "Imersão IA no Agro",
+    # "Imersão IA no Agro [MT]" fica separado (edição MT: Lucas do Rio Verde + Sorriso)
     "Agroadvance Forum - Produtores de Alta Performance": "Imersão Produtores de Alta Performance",
     "Imersão Produção de Alta Performance": "Imersão Produtores de Alta Performance",
     # Eventos próprios (mantêm o nome): Degustação, Rally da Cana

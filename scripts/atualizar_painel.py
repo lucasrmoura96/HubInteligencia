@@ -147,7 +147,7 @@ NEGOCIO_CURSO_ALIASES = {
     "Pós graduação em Fertilidade e Saúde do Solo": "Pos Graduacao em Solos e Fertilidade do Solo",
     "Expert Soja e Milho": "Expert em Soja e Milho",
     "Simpósio Brasileiro De Saúde do Solo": "Simpósio Solo",
-    "Imersão IA no Agro [MT]": "Imersão IA no Agro",
+    # "Imersão IA no Agro [MT]" fica separado (edição MT: Lucas do Rio Verde + Sorriso)
     "Agroadvance Forum - Produtores de Alta Performance": "Imersão Produtores de Alta Performance",
     "Imersão Produção de Alta Performance": "Imersão Produtores de Alta Performance",
     # Eventos próprios (mantêm o nome): Degustação, Rally da Cana
@@ -166,6 +166,41 @@ def curso_do_negocio(row) -> str:
             nome = _TURMA_PREFIXO.sub("", primeira.strip()).strip()
             return NEGOCIO_CURSO_ALIASES.get(nome, nome)
     return "(sem produto)"
+
+
+# ----------------------------------------------------------------------------
+# CONSOLIDAÇÃO de nomes/classificação de curso no RD (limpa o filtro do painel).
+# Confirmado com cliente em 2026-06-15.
+#  - RENAME: editions regionais → nome único.
+#  - FORÇA_TOPO: iscas/eventos (ebook/masterclass) que vazaram pro Fundo → Topo.
+#  - REMOVER: descontinuados/teste → fora do painel (não entram em nenhum total).
+# ----------------------------------------------------------------------------
+RD_CURSO_RENAME = {
+    "Imersão IA no Agro - Lucas do Rio Verde": "Imersão IA no Agro [MT]",
+    "Imersão IA no Agro - Sorriso": "Imersão IA no Agro [MT]",
+    "Imersão IA no Agro - SOR": "Imersão IA no Agro [MT]",
+}
+CURSOS_FORCA_TOPO = {
+    "Ebook Conceitos de Liderança - LGE",
+    "Ebook Gestão de Time - GTC",
+    "Masterclass Estrátégia MKT e Vendas - MVA",
+    "Masterclass Canavial em Foco - PCA",
+    "Masterclass Gestão Opercional - GPA",
+    "Masterclass Gestão Tributaria - GPA",
+    "Especialista em Bioinsumos - Da producao ao manejo",
+}
+CURSOS_REMOVER = {"Teste", "Data Science", "Expert em Soja e Milho", "Expert em Cana de Acucar"}
+
+
+def consolida_curso_rd(rd: pd.DataFrame) -> pd.DataFrame:
+    rd["Curso"] = rd["Curso"].apply(lambda c: RD_CURSO_RENAME.get(str(c).strip(), c) if pd.notna(c) else c)
+    forca = rd["Curso"].isin(CURSOS_FORCA_TOPO)
+    if forca.any():
+        rd.loc[forca, "Grupo"] = "Topo"
+    antes = len(rd)
+    rd = rd[~rd["Curso"].isin(CURSOS_REMOVER)].copy()
+    log(f"Consolidação curso: {int(forca.sum())} lead(s) → Topo; {antes - len(rd)} removido(s) (Teste/Experts/Data Science).")
+    return rd
 
 
 def carrega_depara_identificadores():
@@ -412,6 +447,8 @@ def carrega_bases():
     rd["utm_content"] = rd["Origem da Conversão - Detalhes"].apply(lambda s: extrai_utm(s, "content"))
     # DE-PARA: anexa Conteúdo + preenche Grupo/Curso vazios (classificação por Identificador)
     rd = aplica_depara_no_rd(rd, carrega_depara_identificadores())
+    # Consolidação de nomes de curso (rename + força topo + remove descontinuados/teste)
+    rd = consolida_curso_rd(rd)
 
     log(
         f"Bases carregadas: Ativ={len(ativ):,} | Neg={len(neg):,} | "
