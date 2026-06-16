@@ -129,6 +129,45 @@ def categoriza_por_curso(curso) -> str:
     return "Outros"
 
 
+# ----------------------------------------------------------------------------
+# CURSO DO NEGÓCIO (Pipedrive) — cascata Turma → Curso → Nome do produto.
+# "Produto de Interesse" NUNCA é usado (mal preenchido). 'T1 -'/'T2 -' removidos.
+# De-para unifica os rótulos da Turma com os nomes canônicos do RD/MKT.
+# Confirmado com cliente em 2026-06-15. (DUPLICADO em comercial_pipeline.py — manter sync.)
+# ----------------------------------------------------------------------------
+NEGOCIO_CURSO_ALIASES = {
+    "MBA em Gestão de Propriedades Agrícolas": "MBA em Gestao de Propriedades Agricolas",
+    "MBA em Gestão de Times Comerciais": "MBA em Gestao de Times Comerciais",
+    "MBA em Marketing e Vendas no Agronegócio": "MBA em Marketing e Vendas no Agronegocio",
+    "Pós em Bioinsumos": "Pos em Bioinsumos",
+    "Bioinsumos": "Pos em Bioinsumos",
+    "Pós Graduação Fisiologia Vegetal": "Pos em Fisiologia Vegetal e Nutricao de Plantas",
+    "MBA LGE": "MBA em lideranca, gestao e estrategia no agronegocio",
+    "Pós-Graduação em Solos e Fertilidade do Solo": "Pos Graduacao em Solos e Fertilidade do Solo",
+    "Pós graduação em Fertilidade e Saúde do Solo": "Pos Graduacao em Solos e Fertilidade do Solo",
+    "Expert Soja e Milho": "Expert em Soja e Milho",
+    "Simpósio Brasileiro De Saúde do Solo": "Simpósio Solo",
+    "Imersão IA no Agro [MT]": "Imersão IA no Agro",
+    "Agroadvance Forum - Produtores de Alta Performance": "Imersão Produtores de Alta Performance",
+    "Imersão Produção de Alta Performance": "Imersão Produtores de Alta Performance",
+    # Eventos próprios (mantêm o nome): Degustação, Rally da Cana
+}
+_TURMA_PREFIXO = re.compile(r"^[Tt]\s*\d+\s*[-–—]\s*")
+_TURMA_SEP = re.compile(r",\s*[Tt]\s*\d+\s*[-–—]\s*")  # separa múltiplas turmas: ", T6 - ..."
+
+
+def curso_do_negocio(row) -> str:
+    """Curso canônico de um negócio via cascata Turma→Curso→Nome do produto.
+    Se a Turma listar várias ("T5 - Curso A, T6 - Curso B"), usa a primeira."""
+    for col in ("Negócio - Turma", "Negócio - Curso", "Negócio - Nome do produto"):
+        v = row.get(col)
+        if pd.notna(v) and str(v).strip() and str(v).strip().lower() != "nan":
+            primeira = _TURMA_SEP.split(str(v).strip())[0]
+            nome = _TURMA_PREFIXO.sub("", primeira.strip()).strip()
+            return NEGOCIO_CURSO_ALIASES.get(nome, nome)
+    return "(sem produto)"
+
+
 def carrega_depara_identificadores():
     """Lê a aba RD_Identificadores da DE-PARA → dict ident -> (grupo, curso, conteudo_cat).
     Retorna {} se a DE-PARA não existir.
@@ -923,20 +962,10 @@ def atribui_tipos_negocios(neg: pd.DataFrame, rd: pd.DataFrame):
     tipos = []
     camadas = []
     for _, row in n.iterrows():
-        # Camada A: Negócio - Curso
-        t = normaliza_tipo_curso(row.get('Negócio - Curso'))
+        # Camada A: curso do negócio (cascata Turma→Curso→Nome do produto; nunca Produto de Interesse)
+        t = normaliza_tipo_curso(curso_do_negocio(row))
         if t != 'outros':
-            tipos.append(t); camadas.append('A_curso'); continue
-
-        # Camada B: Negócio - Nome do produto
-        t = normaliza_tipo_curso(row.get('Negócio - Nome do produto'))
-        if t != 'outros':
-            tipos.append(t); camadas.append('B_produto'); continue
-
-        # Camada C: Negócio - Produto de Interesse
-        t = normaliza_tipo_curso(row.get('Negócio - Produto de Interesse'))
-        if t != 'outros':
-            tipos.append(t); camadas.append('C_interesse'); continue
+            tipos.append(t); camadas.append('A_negocio'); continue
 
         # Camada D: RD Station via email
         emails = emails_do_negocio(row)

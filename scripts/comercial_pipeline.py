@@ -41,6 +41,47 @@ def curso_tipo(curso):
     if c.startswith('pos'): return 'pos'
     return 'outros'
 
+# ----------------------------------------------------------------------------
+# CURSO DO NEGÓCIO — fonte de verdade do produto vendido/perdido (Pipedrive)
+# Cascata: Negócio - Turma → Negócio - Curso → Negócio - Nome do produto.
+# "Produto de Interesse" NÃO é usado (mal preenchido). 'T1 -'/'T2 -' são removidos.
+# O de-para unifica os rótulos da Turma com os nomes canônicos do RD/MKT.
+# Confirmado com o cliente em 2026-06-15. (DUPLICADO em atualizar_painel.py — manter em sync.)
+# ----------------------------------------------------------------------------
+NEGOCIO_CURSO_ALIASES = {
+    "MBA em Gestão de Propriedades Agrícolas": "MBA em Gestao de Propriedades Agricolas",
+    "MBA em Gestão de Times Comerciais": "MBA em Gestao de Times Comerciais",
+    "MBA em Marketing e Vendas no Agronegócio": "MBA em Marketing e Vendas no Agronegocio",
+    "Pós em Bioinsumos": "Pos em Bioinsumos",
+    "Bioinsumos": "Pos em Bioinsumos",
+    "Pós Graduação Fisiologia Vegetal": "Pos em Fisiologia Vegetal e Nutricao de Plantas",
+    "MBA LGE": "MBA em lideranca, gestao e estrategia no agronegocio",
+    "Pós-Graduação em Solos e Fertilidade do Solo": "Pos Graduacao em Solos e Fertilidade do Solo",
+    "Pós graduação em Fertilidade e Saúde do Solo": "Pos Graduacao em Solos e Fertilidade do Solo",
+    "Expert Soja e Milho": "Expert em Soja e Milho",
+    "Simpósio Brasileiro De Saúde do Solo": "Simpósio Solo",
+    "Imersão IA no Agro [MT]": "Imersão IA no Agro",
+    "Agroadvance Forum - Produtores de Alta Performance": "Imersão Produtores de Alta Performance",
+    "Imersão Produção de Alta Performance": "Imersão Produtores de Alta Performance",
+    # Eventos próprios (mantêm o nome): Degustação, Rally da Cana
+}
+_TURMA_PREFIXO = re.compile(r"^[Tt]\s*\d+\s*[-–—]\s*")
+_TURMA_SEP = re.compile(r",\s*[Tt]\s*\d+\s*[-–—]\s*")  # separa múltiplas turmas: ", T6 - ..."
+
+def _limpa_turma(s):
+    # 1 negócio pode ter VÁRIAS turmas ("T5 - Curso A, T6 - Curso B") → usa a 1ª
+    primeira = _TURMA_SEP.split(str(s).strip())[0]
+    return _TURMA_PREFIXO.sub("", primeira.strip()).strip()
+
+def curso_do_negocio(row):
+    """Retorna o curso canônico de um negócio via cascata Turma→Curso→Nome do produto."""
+    for col in ("Negócio - Turma", "Negócio - Curso", "Negócio - Nome do produto"):
+        v = row.get(col)
+        if pd.notna(v) and str(v).strip() and str(v).strip().lower() != "nan":
+            nome = _limpa_turma(v)
+            return NEGOCIO_CURSO_ALIASES.get(nome, nome)
+    return "(sem produto)"
+
 # ---------- E-mail (chave de cruzamento RD <-> Pipedrive) ----------
 def norm_email(x):
     s = str(x if x is not None else '').strip().lower()
@@ -254,11 +295,12 @@ def main():
     # ============================================================
     # Cruzamento MQL->SDR (e-mail RD<->Pipedrive) + Qualidade (RQ->Venda) + Detalhe
     # ============================================================
+    # Curso do negócio (cascata Turma→Curso→Nome do produto; nunca Produto de Interesse)
+    neg["_curso"] = neg.apply(curso_do_negocio, axis=1)
     # Mapas por Negócio-ID (chave int)
     id_ganho = {int(nid): bool(g) for nid, g in zip(neg["Negócio - ID"], neg["is_ganho"]) if pd.notna(nid)}
     id_valor = {int(nid): float(v or 0.0) for nid, v in zip(neg["Negócio - ID"], neg["valor"]) if pd.notna(nid)}
-    id_curso = {int(nid): (str(c) if pd.notna(c) else "(sem produto)")
-                for nid, c in zip(neg["Negócio - ID"], neg["Negócio - Produto de Interesse"]) if pd.notna(nid)}
+    id_curso = {int(nid): cur for nid, cur in zip(neg["Negócio - ID"], neg["_curso"]) if pd.notna(nid)}
 
     def _sdr_norm(s):
         if s is None or (isinstance(s, float) and pd.isna(s)): return "(sem SDR)"
@@ -392,7 +434,7 @@ def main():
         })
 
     # ---------- Closer × Curso (mensal): reuniões e vendas por produto ----------
-    neg["_curso"] = neg["Negócio - Produto de Interesse"].fillna("(sem produto)").astype(str)
+    # neg["_curso"] já calculado acima (cascata Turma→Curso→Nome do produto)
     neg["_closer"] = neg["Negócio - Proprietário"].fillna("(sem dono)").astype(str)
     neg["_tipocurso"] = neg["_curso"].apply(curso_tipo)   # mba | pos | imersoes | outros
     # Negócios ganhos com data de ganho válida (vendas/faturamento por mês do GANHO)
@@ -480,7 +522,7 @@ def main():
         "closers": uniq(neg["Negócio - Proprietário"]),
         "sdrs": uniq(neg["Negócio - Proprietário SDR"]),
         "canais": uniq(neg["Negócio - Canal de origem"]),
-        "produtos": uniq(neg["Negócio - Produto de Interesse"]),
+        "produtos": uniq(neg["_curso"]),
     }
 
     data_ref = neg["_criado"].max()

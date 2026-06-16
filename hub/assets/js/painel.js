@@ -372,6 +372,7 @@ function renderTabs() {
       // Filtros de Tipo (Fundo) e Conteúdo (Topo) são exclusivos por aba — zera ao trocar
       STATE.tipoCurso = 'all';
       STATE.conteudo = 'all';
+      STATE.cursos = [];  // lista de cursos é específica por aba (Topo só topo, Fundo só fundo)
       document.querySelectorAll('.tab-funnel').forEach(x => x.classList.toggle('active', x.dataset.tab === STATE.tab));
       setupFiltros();
       renderAll();
@@ -556,10 +557,15 @@ function setupFiltros() {
   MS_INSTANCES.dia.setValores(diasSelecionados() || []);
 
   // ============================================================
-  // Curso: multi-select dos cursos disponíveis
+  // Curso: multi-select — APENAS os cursos/produtos da ABA ativa (Topo só topo, Fundo só fundo)
+  // Deriva da série por_curso_mensal da aba (cursos que têm leads naquele grupo).
   // ============================================================
-  const cursosDisponiveis = (STATE.data.filtros_disponiveis && STATE.data.filtros_disponiveis.cursos) || [];
-  const cursoOptions = cursosDisponiveis.map(c => ({ value: c, text: c }));
+  const cursosDaAba = [...new Set(
+    (STATE.data[STATE.tab].por_curso_mensal || [])
+      .map(r => r.curso)
+      .filter(c => c && String(c).trim() && !/^\(?\s*(vazio|sem\s*curso|null)\s*\)?$/i.test(String(c)))
+  )].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const cursoOptions = cursosDaAba.map(c => ({ value: c, text: c }));
   const cursoWrap = document.getElementById('filtroCursoWrap');
   if (cursoWrap) {
     MS_INSTANCES.curso = createMultiSelect({
