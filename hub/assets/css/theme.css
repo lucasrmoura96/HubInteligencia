@@ -1635,7 +1635,7 @@ body[data-mkt-tab="topo"] .fchip.is-tipo { border-color: var(--accent-500); }
 /* Tabelas de ranking */
 .rank-table-wrap {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); overflow: hidden;
+  border-radius: var(--radius-lg); overflow-x: auto; overflow-y: hidden;
 }
 .rank-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .rank-table thead th {
@@ -1827,6 +1827,8 @@ body[data-mkt-tab="topo"] .fchip.is-tipo { border-color: var(--accent-500); }
 .drill-item .di-nome { font-weight: 600; color: var(--text); flex: 1; min-width: 0; }
 .drill-item .di-q { font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted); white-space: nowrap; }
 .drill-item .di-fat { font-family: var(--font-mono); font-weight: 700; color: var(--brand-600, #18a039); min-width: 96px; text-align: right; }
+/* Reunião que virou venda: minimalista — só a DATA em verde (sem destacar a linha) */
+.drill-item .di-q.di-venda { color: var(--brand-600, #18a039); font-weight: 700; }
 
 /* Select inline no cabeçalho das seções comerciais */
 .sel-inline {

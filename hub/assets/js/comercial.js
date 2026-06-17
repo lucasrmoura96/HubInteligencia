@@ -315,6 +315,19 @@ function sdrNovos(nome) {
   acc.rq_venda_pct = acc.rq_neg ? acc.rq_ganhos / acc.rq_neg * 100 : 0;
   return acc;
 }
+// Vendas ATRIBUÍDAS ao SDR (deal-centric, carimbadas no mês do GANHO): todo negócio ganho
+// cuja reunião o SDR gerou conta como 1 venda dele. Respeita período + tipo + SDR selecionado.
+// 1 negócio → 1 SDR ⇒ Σ SDRs + (sem SDR/self-checkout) = total de vendas do time (reconcilia).
+function sdrVendasAtrib(nome) {
+  let vendas = 0, fat = 0;
+  (CS.data.sdr_vendas_mensal || []).forEach(r => {
+    if (nome && r.sdr !== nome) return;
+    if (!cTupleAtivo(r.ano, r.mes)) return;
+    if (CS.tipoCurso !== 'all' && r.tipo !== CS.tipoCurso) return;
+    vendas += r.vendas || 0; fat += r.fat || 0;
+  });
+  return { vendas, fat };
+}
 // MQLs do período que NÃO foram atribuídos a um SDR (leads que não viraram negócio)
 function mqlsNaoAtribuido() {
   return (CS.data.sdr_mqls_nao_atribuido || [])
@@ -363,7 +376,7 @@ function labelPeriodoC() {
     if (f.ano !== 'all') p.push(String(f.ano));
     base = p.length ? p.join(' · ') : 'Tudo (2025-2026)';
   }
-  if (CS.tipoCurso !== 'all') base = `${({ mba:'MBA', pos:'Pós', imersoes:'Imersões' })[CS.tipoCurso] || CS.tipoCurso} · ${base}`;
+  if (CS.tipoCurso !== 'all') base = `${({ mba:'MBA', pos:'Pós', imersoes:'Imersões', outros:'Outros' })[CS.tipoCurso] || CS.tipoCurso} · ${base}`;
   if (CS.closerSel) base = `${CS.closerSel} · ${base}`;
   return base;
 }
@@ -443,17 +456,27 @@ function renderKpisSdr() {
   const M = (key, inverter) => prev ? momBadge(k[key], prev[key], { fator: info.fator, partial: info.partial, dCur: info.dCur, inverter, fmt: cNr }) : '';
   // Linha única, ordem de funil: topo → reuniões → qualificadas → perdas → caminho alternativo
   const mqlSub = CS.tipoCurso === 'all' ? 'leads de topo · RD' : 'todos os produtos · RD não separa';
-  // Vendas = resultado do time (negócios ganhos); respeita o tipo. MoM de vendas E de faturamento.
-  const vSerie = (CS.tipoCurso !== 'all') ? serieCloserTipo(null) : CS.data.mensal;
-  const vk = somaMeses(vSerie);
-  const vprev = info.ok ? _prevAcc(vSerie, info, ['ganhos', 'faturamento']) : null;
-  const Mv = (key, tag, fmt) => vprev ? momBadge(vk[key], vprev[key], { fator: info.fator, partial: info.partial, dCur: info.dCur, tag, fmt: fmt || cNr }) : '';
+  // Vendas ATRIBUÍDAS ao SDR (deal-centric, mês do ganho): negócio ganho cuja reunião o SDR gerou.
+  // Quando um SDR está selecionado, mostra só o dele. "de X do time" = total de vendas do time no período.
+  const va = sdrVendasAtrib(CS.sdrSel);
+  const teamVk = somaMeses((CS.tipoCurso !== 'all') ? serieCloserTipo(null) : CS.data.mensal);
+  let vaPrev = null;
+  if (info.ok) {
+    let pv = 0, pf = 0;
+    (CS.data.sdr_vendas_mensal || []).forEach(r => {
+      if (CS.sdrSel && r.sdr !== CS.sdrSel) return;
+      if (CS.tipoCurso !== 'all' && r.tipo !== CS.tipoCurso) return;
+      if (r.ano === info.pAno && r.mes === info.pMes) { pv += r.vendas || 0; pf += r.fat || 0; }
+    });
+    vaPrev = { vendas: pv, fat: pf };
+  }
+  const Mva = (key, tag, fmt) => vaPrev ? momBadge(va[key], vaPrev[key], { fator: info.fator, partial: info.partial, dCur: info.dCur, tag, fmt: fmt || cNr }) : '';
   document.getElementById('cKpiSdr').innerHTML = `<div class="kpi-row">
     ${kUno('MQLs', cN(k.mqls), mqlSub, M('mqls'))}
     ${kUno('Reuniões realizadas', cN(k.reunioes_total), 'total no período', M('reunioes_total'))}
     ${kUno('Reuniões Qualif.', cN(k.reunioes_ok), `aproveitamento ${cPct(k.aproveitamento)}`, M('reunioes_ok'))}
     ${kUno('No-show', cN(k.no_show), `${cPct(k.no_show_rate)} das agendadas`, M('no_show', true))}
-    ${kUno('Vendas', cN(vk.ganhos), `${cR$(vk.faturamento)} em faturamento`, Mv('ganhos', 'vendas', cNr) + Mv('faturamento', 'R$', cR$))}
+    ${kUno('Vendas atribuídas', cN(va.vendas), `${cR$(va.fat)} · de ${cN(teamVk.ganhos)} do time`, Mva('vendas', 'vendas', cNr) + Mva('fat', 'R$', cR$))}
   </div>`;
 }
 
@@ -637,11 +660,11 @@ function renderFunilGenerico(innerId, etapas) {
 }
 function renderFunilSdr() {
   const k = somaSdr(getSdrMensal());
-  const vk = somaMeses((CS.tipoCurso !== 'all') ? serieCloserTipo(null) : CS.data.mensal);   // vendas do time
+  const va = sdrVendasAtrib(CS.sdrSel);   // vendas ATRIBUÍDAS ao SDR (reunião dele virou ganho)
   const etapas = [
     { etapa: 'Reuniões', valor: k.reunioes_total, cor: '#1fb541' },
     { etapa: 'Reuniões Quali OK', valor: k.reunioes_ok, cor: '#0f7c2e' },
-    { etapa: 'Vendas', valor: vk.ganhos, faturamento: vk.faturamento, cor: '#0a5c22' },
+    { etapa: 'Vendas', valor: va.vendas, faturamento: va.fat, cor: '#0a5c22' },
   ];
   // MQLs (RD) não têm produto/tipo → só entram no funil quando NÃO há filtro de tipo
   if (CS.tipoCurso === 'all') etapas.unshift({ etapa: 'MQLs', valor: k.mqls, cor: '#3b82f6', topo: true });
@@ -731,11 +754,11 @@ function renderClosersC() {
 // ---------- Pódio + Ranking SDRs (por ATIVIDADE) ----------
 function renderSdrsC() {
   const linhas = sdrEntidades().map(s => {
-    const a = somaSdr(s.mensal); const nv = sdrNovos(s.nome);
-    return { nome:s.nome, is_bot:s.is_bot, sem:s.sem, mqls:nv.mqls, prop:a.propostas, reuT:a.reunioes_total, reuOk:a.reunioes_ok, ns:a.no_show, nsRate:a.no_show_rate, mensalSerie:s.mensal };
-  // GATE: só SDR com ATIVIDADE real no período (reunião/proposta/no-show). Quem só tem MQL
-  // atribuído (ex.: desligados que recebem MQL de negócio antigo) NÃO entra — vai pra nota.
-  }).filter(s => s.reuT>0 || s.prop>0 || s.ns>0).sort((a,b) => b.reuOk - a.reuOk);
+    const a = somaSdr(s.mensal); const nv = sdrNovos(s.nome); const va = sdrVendasAtrib(s.nome);
+    return { nome:s.nome, is_bot:s.is_bot, sem:s.sem, mqls:nv.mqls, prop:a.propostas, reuT:a.reunioes_total, reuOk:a.reunioes_ok, ns:a.no_show, nsRate:a.no_show_rate, vendas:va.vendas, fat:va.fat, mensalSerie:s.mensal };
+  // GATE: SDR com ATIVIDADE real no período (reunião/proposta/no-show) OU com venda atribuída no
+  // período (venda pode fechar neste mês a partir de reunião antiga). Só-MQL NÃO entra — vai pra nota.
+  }).filter(s => s.reuT>0 || s.prop>0 || s.ns>0 || s.vendas>0).sort((a,b) => b.reuOk - a.reuOk);
   const tag = (s) => s.is_bot ? '<span class="sdr-tag bot">automação</span>' : (s.sem ? '<span class="sdr-tag sem">sem SDR</span>' : '');
 
   // Pódio: top 3 SDRs HUMANOS por reuniões qualificadas OK (bot/sem SDR nunca no pódio)
@@ -754,18 +777,22 @@ function renderSdrsC() {
     </div>`;
 
   const corpo = linhas.map((s,i) => {
-    const det = sdrReunioesDetalhe(s.nome);
+    // Drilldown: reuniões qualificadas geradas pelo SDR (produto · data). A data fica VERDE
+    // (só na fonte, minimalista) quando aquela reunião virou venda.
+    const det = sdrReunioesDetalhe(s.nome).filter(r => r.qtd_ok > 0);
     const drill = det.length ? `
-      <tr class="drill-row hidden"><td></td><td colspan="8"><div class="drill-box">
-        <div class="drill-title">Reuniões geradas por ${escC(s.nome)} · curso e data de geração</div>
-        ${det.map(r => `<div class="drill-item"><span class="di-nome">${escC(lblCurso(r.curso))}</span><span class="di-q">${cDataBR(r.data)}${r.qtd>1?` · ${r.qtd} reuniões`:''}${r.qtd_ok?` · ${r.qtd_ok} quali OK`:''}</span><span class="di-fat">${r.qtd_venda?`✅ ${r.qtd_venda} virou venda`:''}</span></div>`).join('')}
+      <tr class="drill-row hidden"><td></td><td colspan="10"><div class="drill-box">
+        <div class="drill-title">Reuniões qualificadas geradas por ${escC(s.nome)} · produto e data</div>
+        ${det.map(r => `<div class="drill-item"><span class="di-nome">${escC(lblCurso(r.curso))}</span><span class="di-q${r.qtd_venda?' di-venda':''}">${cDataBR(r.data)}</span></div>`).join('')}
       </div></td></tr>` : '';
     return `
       <tr class="${s.is_bot?'is-bot':''} ${det.length?'row-click':''}">
         <td class="pos">${i+1}</td><td class="nome">${det.length?'<span class="drill-caret">▸</span> ':''}${escC(s.nome)} ${tag(s)}</td>
         <td class="num"><b>${cN(s.mqls)}</b></td>
         <td class="num">${cN(s.prop)}</td><td class="num">${cN(s.reuT)}</td>
-        <td class="num"><b>${cN(s.reuOk)}</b></td><td class="num">${cN(s.ns)}</td><td class="num">${cPct(s.nsRate)}</td>
+        <td class="num"><b>${cN(s.reuOk)}</b></td>
+        <td class="num"><b>${cN(s.vendas)}</b></td><td class="num">${cR$(s.fat)}</td>
+        <td class="num">${cN(s.ns)}</td><td class="num">${cPct(s.nsRate)}</td>
         <td class="spark-td">${sparkline(ultimosMeses(s.mensalSerie,'reunioes_ok',12))}</td>
       </tr>${drill}`;
   }).join('');
@@ -780,7 +807,7 @@ function renderSdrsC() {
 
   const tabela = `
     <table class="rank-table">
-      <thead><tr><th>#</th><th>SDR</th><th class="num" title="MQLs que viraram negócio atribuído a este SDR (e-mail RD↔Pipedrive). Não-atribuídos na nota abaixo.">MQLs</th><th class="num">Proposta wpp</th><th class="num">Reuniões</th><th class="num">Reuniões Quali OK</th><th class="num">No-show</th><th class="num">No-show %</th><th class="spark-th">12m · reun. OK</th></tr></thead>
+      <thead><tr><th>#</th><th>SDR</th><th class="num" title="MQLs que viraram negócio atribuído a este SDR (e-mail RD↔Pipedrive). Não-atribuídos na nota abaixo.">MQLs</th><th class="num">Proposta wpp</th><th class="num">Reuniões</th><th class="num">Reuniões Quali OK</th><th class="num" title="Vendas atribuídas: negócios GANHOS cuja reunião este SDR gerou (carimbadas no mês do ganho). A soma dos SDRs + self-checkout reconcilia com o total de vendas do time.">Vendas</th><th class="num">Faturamento</th><th class="num">No-show</th><th class="num">No-show %</th><th class="spark-th">12m · reun. OK</th></tr></thead>
       <tbody>${corpo}</tbody>
     </table>${nota}`;
   const host = document.getElementById('cSdrs');
@@ -995,7 +1022,7 @@ function renderChipsC() {
   const chips = [];
   const per = periodoLabelC();
   if (per) chips.push({ k:'Período', v: per, rem:'periodo' });
-  if (CS.tipoCurso !== 'all') chips.push({ k:'Tipo', v: ({mba:'MBA',pos:'Pós',imersoes:'Imersões'})[CS.tipoCurso] || CS.tipoCurso, rem:'tipo', cls:'is-tipo' });
+  if (CS.tipoCurso !== 'all') chips.push({ k:'Tipo', v: ({mba:'MBA',pos:'Pós',imersoes:'Imersões',outros:'Outros'})[CS.tipoCurso] || CS.tipoCurso, rem:'tipo', cls:'is-tipo' });
   if (CS.closerSel) chips.push({ k:'Closer', v: CS.closerSel, rem:'closer', cls:'is-sel' });
   if (CS.cursoSel.length) chips.push({ k:'Curso', v: CS.cursoSel.length === 1 ? lblCurso(CS.cursoSel[0]) : `${CS.cursoSel.length} cursos`, rem:'curso', cls:'is-sel' });
   if (CS.sdrSel) chips.push({ k:'SDR', v: CS.sdrSel, rem:'sdr', cls:'is-sel' });
@@ -1108,9 +1135,11 @@ function renderCursoPerf() {
 // ---------- Eficiência · SDRs (aproveitamento das reuniões, não só volume) ----------
 function renderEfSdr() {
   const linhas = sdrEntidades().map(s => {
-    const a = somaSdr(s.mensal); const nv = sdrNovos(s.nome);
+    const a = somaSdr(s.mensal); const nv = sdrNovos(s.nome); const va = sdrVendasAtrib(s.nome);
+    // Vendas/Faturamento = atribuição deal-centric (mesmo número do ranking). RQ→Venda% segue
+    // sendo a conversão das reuniões QUALIFICADAS (cohort de reunião) — indicador de qualidade.
     return { nome:s.nome, is_bot:s.is_bot, sem:s.sem, reuT:a.reunioes_total, aprov:a.aproveitamento, nsRate:a.no_show_rate,
-      rqNeg:nv.rq_neg, rqVendaPct:nv.rq_venda_pct, vendas:nv.rq_ganhos, fat:nv.fat_infl };
+      rqNeg:nv.rq_neg, rqVendaPct:nv.rq_venda_pct, vendas:va.vendas, fat:va.fat };
   }).filter(s => s.reuT >= 5)  // volume mínimo de reuniões p/ as taxas fazerem sentido
     .sort((a,b) => b.rqVendaPct - a.rqVendaPct || b.vendas - a.vendas);
   const tag = (s) => s.is_bot ? '<span class="sdr-tag bot">automação</span>' : (s.sem ? '<span class="sdr-tag sem">sem SDR</span>' : '');

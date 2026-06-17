@@ -148,9 +148,11 @@ def main():
     # NÃO usamos o campo "Concluído" — é operacionalmente não-confiável (esquecido
     # ou marcado dias depois). Contabilizamos pelo TIPO + data adicionada + feedback.
     ativ["_tipo"] = ativ["Atividade - Tipo"].astype(str)
+    # "No Show (Teste - Segunda)" é tipo de teste do CRM → NÃO conta como no-show real.
+    _eh_teste = ativ["_tipo"].str.contains("Teste", case=False, na=False)
     reuniao_ok = ativ[ativ["_tipo"].str.contains("Reuni", case=False, na=False)]
     proposta = ativ[ativ["_tipo"].str.contains("Proposta", case=False, na=False)]
-    noshow = ativ[ativ["_tipo"].str.contains("No Show", case=False, na=False)]
+    noshow = ativ[ativ["_tipo"].str.contains("No Show", case=False, na=False) & ~_eh_teste]
 
     ids_reuniao = set(reuniao_ok["Negócio - ID"].dropna().astype(int))
     ids_proposta = set(proposta["Negócio - ID"].dropna().astype(int))
@@ -310,7 +312,7 @@ def main():
     av["_ok"] = av["Negócio - Qualificação/Feedback:"].isin(QUALI_OK)
     av["is_reu"] = av["_tipo"].str.contains("Reuni", case=False, na=False)
     av["is_prop"] = av["_tipo"].str.contains("Proposta", case=False, na=False)
-    av["is_ns"] = av["_tipo"].str.contains("No Show", case=False, na=False)
+    av["is_ns"] = av["_tipo"].str.contains("No Show", case=False, na=False) & ~av["_tipo"].str.contains("Teste", case=False, na=False)
     av["is_reu_ok"] = av["is_reu"] & av["_ok"]
     # ============================================================
     # Cruzamento MQL->SDR (e-mail RD<->Pipedrive) + Qualidade (RQ->Venda) + Detalhe
@@ -414,6 +416,40 @@ def main():
     sdr_reunioes_detalhe = [
         {"sdr": s, "data": d, "curso": c, **v} for (s, d, c), v in det_acc.items()
     ]
+
+    # (5) VENDAS ATRIBUÍDAS ao SDR (deal-centric, mês do GANHO) — RECONCILIA com o time.
+    # Regra (confirmada pelo cliente 2026-06-16): todo negócio GANHO que teve uma REUNIÃO
+    # gerada pelo SDR conta como 1 venda do SDR, carimbada no mês do GANHO (não no mês da
+    # reunião — isso corrigiu o caso Maikon=0 em jun/26, que tinha 2 vendas de reuniões antigas).
+    # 1 negócio → 1 SDR (SDR = "Negócio - Proprietário SDR" do negócio; fallback = SDR da
+    # 1ª reunião do negócio) ⇒ sem duplo-contagem. Soma por SDR + (sem SDR) = total do time.
+    # NÃO exige "Qualificação OK" (qualquer reunião que virou ganho conta — decisão do cliente).
+    sdr_da_reuniao = {}  # nid -> 1º SDR != (sem SDR) entre as reuniões do negócio
+    for nid, s in zip(reuniao_ok["Negócio - ID"], reuniao_ok["Negócio - Proprietário SDR"]):
+        if pd.isna(nid):
+            continue
+        nid = int(nid); s = _sdr_norm(s)
+        if s != "(sem SDR)":
+            sdr_da_reuniao.setdefault(nid, s)
+    sv_acc = {}   # (sdr, tipo, ano, mes_ganho) -> {vendas, fat}
+    won_attr = neg[neg["is_ganho"] & neg["tem_reuniao"] & neg["_ganho"].notna()]
+    for nid, sdr_deal, curso, gdt, val in zip(
+            won_attr["Negócio - ID"], won_attr["Negócio - Proprietário SDR"],
+            won_attr["_curso"], won_attr["_ganho"], won_attr["valor"]):
+        sdr = _sdr_norm(sdr_deal)
+        nid_i = int(nid) if pd.notna(nid) else None
+        if sdr == "(sem SDR)" and nid_i is not None:
+            sdr = sdr_da_reuniao.get(nid_i, "(sem SDR)")
+        if sdr == "(sem SDR)":
+            continue
+        tp = curso_tipo(curso)
+        key = (sdr, tp, int(gdt.year), int(gdt.month))
+        rec = sv_acc.setdefault(key, {"sdr": sdr, "tipo": tp,
+                                      "ano": int(gdt.year), "mes": int(gdt.month),
+                                      "vendas": 0, "fat": 0.0})
+        rec["vendas"] += 1
+        rec["fat"] = round(rec["fat"] + float(val), 2)
+    sdr_vendas_mensal = list(sv_acc.values())
 
     # ---------- Motivos de perda (mensal) ----------
     perd = neg[neg["is_perdido"]].copy()
@@ -561,6 +597,7 @@ def main():
         "closers": closers,
         "sdrs": sdrs,
         "sdr_mqls_nao_atribuido": sdr_mqls_nao_atribuido,
+        "sdr_vendas_mensal": sdr_vendas_mensal,
         "sdr_reunioes_detalhe": sdr_reunioes_detalhe,
         "sdr_reunioes_diario": sdr_reunioes_diario,
         "closer_vendas_diario": closer_vendas_diario,
