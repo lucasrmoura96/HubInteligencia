@@ -569,6 +569,114 @@ def main():
         }
     sdr_tipo_mensal = list(st_acc.values())
 
+    # ============================================================
+    # SÉRIES DIÁRIAS — espelham as mensais, mas por DATA (cada métrica na sua data:
+    # criados/quali/reunião/perda/no-show por CRIAÇÃO; vendas/fat por GANHO; mqls por conversão).
+    # Usadas pelo front SÓ quando há filtro de Dia/Range ativo (senão usa as mensais).
+    # ============================================================
+    neg["_cdata"] = neg["_criado"].dt.strftime("%Y-%m-%d")
+    neg["_gdata"] = neg["_ganho"].dt.strftime("%Y-%m-%d")
+    av["_adata"] = av["_dt"].dt.strftime("%Y-%m-%d")
+    rd_f["_cdata"] = rd_f["_dt"].dt.strftime("%Y-%m-%d")
+    _DNULL = (None, "NaT", "nan", "")
+    _wd = neg[neg["is_ganho"]]  # re-slice: agora carrega _cdata/_gdata
+
+    # (1) Global diário
+    dia_acc = {}
+    def _diarec(d):
+        return dia_acc.setdefault(d, {"data": d, "mqls": 0, "criados": 0, "qualificados": 0,
+            "com_reuniao": 0, "reunioes_qualificadas": 0, "no_show": 0, "perdidos": 0,
+            "abertos": 0, "ganhos": 0, "faturamento": 0.0})
+    for d, sub in neg.groupby("_cdata"):
+        if d in _DNULL: continue
+        r = _diarec(d); r["criados"] += len(sub)
+        r["perdidos"] += int(sub["is_perdido"].sum()); r["abertos"] += int(sub["is_aberto"].sum())
+        r["qualificados"] += int(sub["is_quali_ok"].sum()); r["com_reuniao"] += int(sub["tem_reuniao"].sum())
+        r["reunioes_qualificadas"] += int(sub["is_rq"].sum()); r["no_show"] += int(sub["tem_noshow"].sum())
+    for d, sub in _wd.groupby("_gdata"):
+        if d in _DNULL: continue
+        r = _diarec(d); r["ganhos"] += len(sub)
+        r["faturamento"] = round(r["faturamento"] + float(sub["valor"].sum()), 2)
+    for d, sub in rd_f.groupby("_cdata"):
+        if d in _DNULL: continue
+        _diarec(d)["mqls"] += len(sub)
+    diario = list(dia_acc.values())
+
+    # (2) SDR × tipo × dia (atividades)
+    std = {}
+    for (s, tp, d), sub in av.groupby(["sdr", "_tipocurso", "_adata"]):
+        if d in _DNULL: continue
+        std[(s, tp, d)] = {"sdr": s, "tipo": tp, "data": d,
+            "propostas": int(sub["is_prop"].sum()), "reunioes_total": int(sub["is_reu"].sum()),
+            "reunioes_ok": int(sub["is_reu_ok"].sum()), "no_show": int(sub["is_ns"].sum())}
+    sdr_tipo_diario = list(std.values())
+
+    # (3) SDR × dia — MQLs atribuídos (e-mail RD↔Pipedrive, por data de conversão)
+    smd = {}
+    for d, email, dconv in zip(rd_f["_cdata"], rd_f["_email"], rd_f["_dt"]):
+        if d in _DNULL: continue
+        sdr = attrib_sdr(email, dconv) if email else None
+        if sdr is not None and sdr != "(sem SDR)":
+            smd[(sdr, d)] = smd.get((sdr, d), 0) + 1
+    sdr_mqls_diario = [{"sdr": s, "data": d, "mqls": q} for (s, d), q in smd.items()]
+
+    # (4) SDR × tipo × dia — vendas atribuídas (mês→dia do GANHO; mesma regra deal-centric)
+    svd = {}
+    for nid, sdr_deal, curso, gdt, val in zip(
+            won_attr["Negócio - ID"], won_attr["Negócio - Proprietário SDR"],
+            won_attr["_curso"], won_attr["_ganho"], won_attr["valor"]):
+        sdr = _sdr_norm(sdr_deal)
+        nid_i = int(nid) if pd.notna(nid) else None
+        if sdr == "(sem SDR)" and nid_i is not None:
+            sdr = sdr_da_reuniao.get(nid_i, "(sem SDR)")
+        if sdr == "(sem SDR)" or pd.isna(gdt): continue
+        tp = curso_tipo(curso); d = gdt.strftime("%Y-%m-%d")
+        rec = svd.setdefault((sdr, tp, d), {"sdr": sdr, "tipo": tp, "data": d, "vendas": 0, "fat": 0.0})
+        rec["vendas"] += 1; rec["fat"] = round(rec["fat"] + float(val), 2)
+    sdr_vendas_diario = list(svd.values())
+
+    # (5) CLOSER × tipo × dia
+    ctd = {}
+    def _ctd(c, tp, d):
+        return ctd.setdefault((c, tp, d), {"closer": c, "tipo": tp, "data": d, "criados": 0,
+            "perdidos": 0, "qualificados": 0, "com_reuniao": 0, "rq": 0, "no_show": 0, "ganhos": 0, "faturamento": 0.0})
+    for (c, tp, d), sub in neg.groupby(["_closer", "_tipocurso", "_cdata"]):
+        if d in _DNULL: continue
+        r = _ctd(c, tp, d); r["criados"] += len(sub); r["perdidos"] += int(sub["is_perdido"].sum())
+        r["qualificados"] += int(sub["is_quali_ok"].sum()); r["com_reuniao"] += int(sub["tem_reuniao"].sum())
+        r["rq"] += int(sub["is_rq"].sum()); r["no_show"] += int(sub["tem_noshow"].sum())
+    for (c, tp, d), sub in _wd.groupby(["_closer", "_tipocurso", "_gdata"]):
+        if d in _DNULL: continue
+        r = _ctd(c, tp, d); r["ganhos"] += len(sub); r["faturamento"] = round(r["faturamento"] + float(sub["valor"].sum()), 2)
+    closer_tipo_diario = list(ctd.values())
+
+    # (6) CURSO × dia
+    cud = {}
+    def _cud(cu, d):
+        return cud.setdefault((cu, d), {"curso": cu, "data": d, "criados": 0, "perdidos": 0,
+            "qualificados": 0, "com_reuniao": 0, "rq": 0, "ganhos": 0, "faturamento": 0.0})
+    for (cu, d), sub in neg.groupby(["_curso", "_cdata"]):
+        if d in _DNULL: continue
+        r = _cud(cu, d); r["criados"] += len(sub); r["perdidos"] += int(sub["is_perdido"].sum())
+        r["qualificados"] += int(sub["is_quali_ok"].sum()); r["com_reuniao"] += int(sub["tem_reuniao"].sum())
+        r["rq"] += int(sub["is_rq"].sum())
+    for (cu, d), sub in _wd.groupby(["_curso", "_gdata"]):
+        if d in _DNULL: continue
+        r = _cud(cu, d); r["ganhos"] += len(sub); r["faturamento"] = round(r["faturamento"] + float(sub["valor"].sum()), 2)
+    curso_diario = list(cud.values())
+
+    # (7) CLOSER × CURSO × dia — reuniões (criação) + vendas/fat (ganho)
+    ccd = {}
+    def _ccd(c, cu, d):
+        return ccd.setdefault((c, cu, d), {"closer": c, "curso": cu, "data": d, "reunioes": 0, "vendas": 0, "faturamento": 0.0})
+    for (c, cu, d), sub in neg.groupby(["_closer", "_curso", "_cdata"]):
+        if d in _DNULL: continue
+        _ccd(c, cu, d)["reunioes"] += int(sub["tem_reuniao"].sum())
+    for (c, cu, d), sub in _wd.groupby(["_closer", "_curso", "_gdata"]):
+        if d in _DNULL: continue
+        r = _ccd(c, cu, d); r["vendas"] += len(sub); r["faturamento"] = round(r["faturamento"] + float(sub["valor"].sum()), 2)
+    closer_curso_diario = list(ccd.values())
+
     # ---------- Filtros disponíveis ----------
     def uniq(serie):
         return sorted([str(x) for x in serie.dropna().unique() if str(x).strip()])
@@ -604,6 +712,14 @@ def main():
         "venda_closer_curso_diario": venda_closer_curso_diario,
         "closer_curso_mensal": closer_curso_mensal,
         "curso_mensal": curso_mensal,
+        # Séries DIÁRIAS (usadas quando há filtro de Dia/Range; espelham as mensais)
+        "diario": diario,
+        "sdr_tipo_diario": sdr_tipo_diario,
+        "sdr_mqls_diario": sdr_mqls_diario,
+        "sdr_vendas_diario": sdr_vendas_diario,
+        "closer_tipo_diario": closer_tipo_diario,
+        "curso_diario": curso_diario,
+        "closer_curso_diario": closer_curso_diario,
         "motivos_perda_mensal": motivos_mensal,
         "filtros_disponiveis": filtros,
     }
