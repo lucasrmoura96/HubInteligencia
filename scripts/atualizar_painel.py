@@ -130,42 +130,12 @@ def categoriza_por_curso(curso) -> str:
 
 
 # ----------------------------------------------------------------------------
-# CURSO DO NEGÓCIO (Pipedrive) — cascata Turma → Curso → Nome do produto.
-# "Produto de Interesse" NUNCA é usado (mal preenchido). 'T1 -'/'T2 -' removidos.
-# De-para unifica os rótulos da Turma com os nomes canônicos do RD/MKT.
-# Confirmado com cliente em 2026-06-15. (DUPLICADO em comercial_pipeline.py — manter sync.)
+# CURSO DO NEGÓCIO (Pipedrive) — CENTRALIZADO em comercial_pipeline (2026-06-22).
+# Não duplicar aqui: a cascata (Turma→Curso→Nome do produto→Produto de Interesse) e a
+# padronização canônica (tira prefixo/sufixo de turma, unifica acento/caixa) vivem lá,
+# e este módulo apenas reusa — garante consistência nas próximas atualizações.
 # ----------------------------------------------------------------------------
-NEGOCIO_CURSO_ALIASES = {
-    "MBA em Gestão de Propriedades Agrícolas": "MBA em Gestao de Propriedades Agricolas",
-    "MBA em Gestão de Times Comerciais": "MBA em Gestao de Times Comerciais",
-    "MBA em Marketing e Vendas no Agronegócio": "MBA em Marketing e Vendas no Agronegocio",
-    "Pós em Bioinsumos": "Pos em Bioinsumos",
-    "Bioinsumos": "Pos em Bioinsumos",
-    "Pós Graduação Fisiologia Vegetal": "Pos em Fisiologia Vegetal e Nutricao de Plantas",
-    "MBA LGE": "MBA em lideranca, gestao e estrategia no agronegocio",
-    "Pós-Graduação em Solos e Fertilidade do Solo": "Pos Graduacao em Solos e Fertilidade do Solo",
-    "Pós graduação em Fertilidade e Saúde do Solo": "Pos Graduacao em Solos e Fertilidade do Solo",
-    "Expert Soja e Milho": "Expert em Soja e Milho",
-    "Simpósio Brasileiro De Saúde do Solo": "Simpósio Solo",
-    # "Imersão IA no Agro [MT]" fica separado (edição MT: Lucas do Rio Verde + Sorriso)
-    "Agroadvance Forum - Produtores de Alta Performance": "Imersão Produtores de Alta Performance",
-    "Imersão Produção de Alta Performance": "Imersão Produtores de Alta Performance",
-    # Eventos próprios (mantêm o nome): Degustação, Rally da Cana
-}
-_TURMA_PREFIXO = re.compile(r"^[Tt]\s*\d+\s*[-–—]\s*")
-_TURMA_SEP = re.compile(r",\s*[Tt]\s*\d+\s*[-–—]\s*")  # separa múltiplas turmas: ", T6 - ..."
-
-
-def curso_do_negocio(row) -> str:
-    """Curso canônico de um negócio via cascata Turma→Curso→Nome do produto.
-    Se a Turma listar várias ("T5 - Curso A, T6 - Curso B"), usa a primeira."""
-    for col in ("Negócio - Turma", "Negócio - Curso", "Negócio - Nome do produto"):
-        v = row.get(col)
-        if pd.notna(v) and str(v).strip() and str(v).strip().lower() != "nan":
-            primeira = _TURMA_SEP.split(str(v).strip())[0]
-            nome = _TURMA_PREFIXO.sub("", primeira.strip()).strip()
-            return NEGOCIO_CURSO_ALIASES.get(nome, nome)
-    return "(sem produto)"
+from comercial_pipeline import curso_do_negocio, canon_curso  # noqa: E402,F401
 
 
 # ----------------------------------------------------------------------------
@@ -2252,12 +2222,14 @@ def por_curso_vendas_mensal(neg: pd.DataFrame) -> list:
 # ----------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------
-def main():
+def main(bases=None):
+    """bases=None → carrega dos xlsx (modo legado). bases=(ativ,neg,inv,rd) → usa DataFrames
+    prontos (modo API: o consumidor monta dos caches). O resto do pipeline é idêntico."""
     log("=" * 60)
     log("INICIANDO PIPELINE HUB AGROADVANCE")
     log("=" * 60)
 
-    ativ, neg, inv, rd = carrega_bases()
+    ativ, neg, inv, rd = bases if bases is not None else carrega_bases()
 
     # Data de referência: última data presente no RD
     data_ref = rd["Data da Conversão"].max()

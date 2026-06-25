@@ -43,51 +43,82 @@ def curso_tipo(curso):
 
 # ----------------------------------------------------------------------------
 # CURSO DO NEGÓCIO — fonte de verdade do produto vendido/perdido (Pipedrive)
-# Cascata: Negócio - Turma → Negócio - Curso → Negócio - Nome do produto.
-# "Produto de Interesse" NÃO é usado (mal preenchido). 'T1 -'/'T2 -' são removidos.
-# O de-para unifica os rótulos da Turma com os nomes canônicos do RD/MKT.
-# Confirmado com o cliente em 2026-06-15. (DUPLICADO em atualizar_painel.py — manter em sync.)
+# Cascata: Negócio - Turma → Negócio - Curso → Negócio - Nome do produto → Produto de Interesse.
+# (Produto de Interesse, 2026-06-22: enum bem preenchido — usado SÓ p/ preencher quem ficaria
+#  "(sem produto)"; recupera ~87% dos brancos sem tocar em quem já está classificado.)
+#
+# Padronização (2026-06-22, decisão do cliente "limpe tudo, sem turma no nome, consistente"):
+#  - canon_curso() tira prefixo ("T5 - ") E sufixo (" - Turma 6 06/05/24") de turma e
+#    unifica variantes de acento/caixa do MESMO curso num único nome canônico acentuado.
+#  - Chave de match = forma normalizada (sem acento, minúscula, sem turma) → robusto p/ updates.
+# Centralizado aqui; atualizar_painel.py importa deste módulo (não duplicar).
 # ----------------------------------------------------------------------------
-NEGOCIO_CURSO_ALIASES = {
-    "MBA em Gestão de Propriedades Agrícolas": "MBA em Gestao de Propriedades Agricolas",
-    "MBA em Gestão de Times Comerciais": "MBA em Gestao de Times Comerciais",
-    "MBA em Marketing e Vendas no Agronegócio": "MBA em Marketing e Vendas no Agronegocio",
-    "Pós em Bioinsumos": "Pos em Bioinsumos",
-    "Bioinsumos": "Pos em Bioinsumos",
-    "Pós Graduação Fisiologia Vegetal": "Pos em Fisiologia Vegetal e Nutricao de Plantas",
-    "MBA LGE": "MBA em lideranca, gestao e estrategia no agronegocio",
-    "Pós-Graduação em Solos e Fertilidade do Solo": "Pos Graduacao em Solos e Fertilidade do Solo",
-    "Pós graduação em Fertilidade e Saúde do Solo": "Pos Graduacao em Solos e Fertilidade do Solo",
-    "Expert Soja e Milho": "Expert em Soja e Milho",
-    "Simpósio Brasileiro De Saúde do Solo": "Simpósio Solo",
-    # "Imersão IA no Agro [MT]" fica separado (edição MT: Lucas do Rio Verde + Sorriso)
-    "Agroadvance Forum - Produtores de Alta Performance": "Imersão Produtores de Alta Performance",
-    "Imersão Produção de Alta Performance": "Imersão Produtores de Alta Performance",
-    # Eventos próprios (mantêm o nome): Degustação, Rally da Cana
-}
-_TURMA_PREFIXO = re.compile(r"^[Tt]\s*\d+\s*[-–—]\s*")
-_TURMA_SEP = re.compile(r",\s*[Tt]\s*\d+\s*[-–—]\s*")  # separa múltiplas turmas: ", T6 - ..."
+_TURMA_PREFIXO = re.compile(r"^[Tt]\s*\d+\s*[-–—:]\s*")
+_TURMA_SEP = re.compile(r",\s*[Tt]\s*\d+\s*[-–—]\s*")          # múltiplas turmas: ", T6 - ..."
+_TURMA_SUFIXO = re.compile(r"\s*[-–—:]?\s*[Tt]urma\s*\d+.*$")  # "- Turma 6", "- Turma 5 06/05/24"
+_FIM_SEP = re.compile(r"[\s\-–—:]+$")
 
-def _limpa_turma(s):
-    # 1 negócio pode ter VÁRIAS turmas ("T5 - Curso A, T6 - Curso B") → usa a 1ª
-    primeira = _TURMA_SEP.split(str(s).strip())[0]
-    return _TURMA_PREFIXO.sub("", primeira.strip()).strip()
+def _strip_turma(s):
+    s = _TURMA_SEP.split(str(s).strip())[0].strip()  # 1 negócio com várias turmas → usa a 1ª
+    s = _TURMA_PREFIXO.sub("", s).strip()             # prefixo "T5 - "
+    s = _TURMA_SUFIXO.sub("", s).strip()              # sufixo " - Turma N [data]"
+    return _FIM_SEP.sub("", s).strip()                # separador solto no fim
+
+def _norm(s):
+    s = ''.join(ch for ch in unicodedata.normalize('NFD', str(s).lower()) if unicodedata.category(ch) != 'Mn')
+    s = re.sub(r"[^a-z0-9\[\] ]+", " ", s)            # mantém [MT]; remove pontuação
+    return re.sub(r"\s+", " ", s).strip()
+
+# Nome canônico (acentuado, limpo) -> lista de chaves normalizadas que mapeiam p/ ele.
+_CURSO_CANON_DEF = {
+    "MBA em Liderança, Gestão e Estratégia no Agronegócio": ["mba em lideranca gestao e estrategia no agronegocio", "mba lge", "mba lideranca gestao e estrategia"],
+    "MBA em Liderança e Gestão de Pessoas no Agronegócio": ["mba em lideranca e gestao de pessoas no agronegocio"],
+    "MBA em Gestão de Propriedades Agrícolas": ["mba em gestao de propriedades agricolas", "mba gestao de propriedades agricolas"],
+    "MBA em Gestão de Times Comerciais": ["mba em gestao de times comerciais", "mba gestao de times comerciais"],
+    "MBA em Marketing e Vendas no Agronegócio": ["mba em marketing e vendas no agronegocio", "mba marketing e vendas"],
+    "MBA em Marketing Estratégico no Agronegócio": ["mba em marketing estrategico no agronegocio"],
+    "MBA em Vendas no Agronegócio": ["mba em vendas no agronegocio"],
+    "MBA em Agronegócios": ["mba em agronegocios"],
+    "MBA em Inteligência Artificial para Líderes do Agronegócio": ["mba em inteligencia artificial para lideres do agronegocio"],
+    "Pós-Graduação em Cana-de-Açúcar": ["pos graduacao em cana de acucar", "pos graduacao cana de acucar"],
+    "Pós-Graduação em Fisiologia Vegetal e Nutrição de Plantas": ["pos graduacao em fisiologia vegetal e nutricao de plantas", "pos em fisiologia vegetal e nutricao de plantas", "pos graduacao fisiologia vegetal", "pos fisiologia e nutricao"],
+    "Pós-Graduação em Bioinsumos": ["pos graduacao em bioinsumos", "pos em bioinsumos", "pos bioinsumos", "pos graduacao bioinsumos", "bioinsumos"],
+    "Pós-Graduação em Solos e Fertilidade do Solo": ["pos graduacao em solos e fertilidade do solo", "pos graduacao em fertilidade e saude do solo", "pos graduacao em fertilidade e saude do solos"],
+    "Pós-Graduação em Soja e Milho": ["pos graduacao em soja e milho"],
+    "Pós-Graduação em Saúde do Solo": ["pos graduacao em saude do solo"],
+    "Pós-Graduação em Nutrologia Vegetal": ["pos graduacao em nutrologia vegetal"],
+    "Imersão IA no Agro [MT]": ["imersao ia no agro [mt]", "imersao ia no agro lucas do rio verde", "imersao ia no agro sorriso", "imersao ia no agro sor"],
+    "Imersão IA no Agro": ["imersao ia no agro"],
+    "Imersão Dinheiro no Agro": ["imersao dinheiro no agro"],
+    "Imersão Internacional China": ["imersao internacional china"],
+    "Imersão Marketing e Vendas no Agro": ["imersao marketing e vendas no agro"],
+    "Imersão Produtores de Alta Performance": ["imersao produtores de alta performance", "imersao producao de alta performance", "agroadvance forum produtores de alta performance"],
+    "Sucessores no Agro": ["sucessores no agro", "sucessores do agro"],
+    "Simpósio Brasileiro de Saúde do Solo": ["simposio brasileiro de saude do solo", "simposio solo"],
+    "Academia de Líderes do Agro": ["academia de lideres do agro"],
+}
+_CURSO_CANON = {k: nome for nome, chaves in _CURSO_CANON_DEF.items() for k in chaves}
+
+def canon_curso(raw):
+    """Normaliza UM rótulo de curso/turma p/ o nome canônico. Sem match → devolve só o nome limpo (sem turma)."""
+    limpo = _strip_turma(raw)
+    if not limpo:
+        return ""
+    return _CURSO_CANON.get(_norm(limpo), limpo)
 
 def curso_do_negocio(row):
-    """Retorna o curso canônico de um negócio via cascata Turma→Curso→Nome do produto."""
-    for col in ("Negócio - Turma", "Negócio - Curso", "Negócio - Nome do produto"):
+    """Curso canônico de um negócio via cascata Turma→Curso→Nome do produto→Produto de Interesse.
+    Produto de Interesse só decide quando os 3 primeiros estão vazios (enriquece o '(sem produto)')."""
+    for col in ("Negócio - Turma", "Negócio - Curso", "Negócio - Nome do produto", "Negócio - Produto de Interesse"):
         v = row.get(col)
         if pd.notna(v) and str(v).strip() and str(v).strip().lower() != "nan":
-            nome = _limpa_turma(v)
-            return NEGOCIO_CURSO_ALIASES.get(nome, nome)
+            c = canon_curso(v)
+            if c:
+                return c
     return "(sem produto)"
 
-# Consolidação (mesma do MKT, 2026-06-15): edições MT unificadas + descontinuados removidos.
-RD_CURSO_RENAME = {
-    "Imersão IA no Agro - Lucas do Rio Verde": "Imersão IA no Agro [MT]",
-    "Imersão IA no Agro - Sorriso": "Imersão IA no Agro [MT]",
-    "Imersão IA no Agro - SOR": "Imersão IA no Agro [MT]",
-}
+# Mantido p/ compatibilidade (a unificação MT agora vive no _CURSO_CANON). No-op na prática.
+RD_CURSO_RENAME = {}
 CURSOS_REMOVER = {"Teste", "Data Science"}
 
 def _removido(curso):
@@ -106,21 +137,31 @@ def emails_cell(x):
     return [e for e in (norm_email(p) for p in re.split(r'[;,\s]+', str(x))) if e]
 
 
-def main():
-    log(f"Lendo {NEG_FILE.name}")
-    neg = pd.read_excel(NEG_FILE, sheet_name=0)
-    log(f"Lendo {ATIV_FILE.name}")
-    ativ = pd.read_excel(ATIV_FILE, sheet_name=0)
-    log(f"Lendo {RD_FILE.name}")
-    rd = pd.read_excel(RD_FILE, sheet_name=0)
+def main(neg=None, ativ=None, rd=None, saida=None):
+    # neg/ativ/rd podem ser injetados (ex.: pipeline-API). Se None, le os Excel (modo original).
+    if neg is None:
+        log(f"Lendo {NEG_FILE.name}"); neg = pd.read_excel(NEG_FILE, sheet_name=0)
+    if ativ is None:
+        log(f"Lendo {ATIV_FILE.name}"); ativ = pd.read_excel(ATIV_FILE, sheet_name=0)
+    if rd is None:
+        log(f"Lendo {RD_FILE.name}"); rd = pd.read_excel(RD_FILE, sheet_name=0)
 
     # ---------- MQLs do RD (Fundo) por mês — topo do funil comercial ----------
     rd["_dt"] = pd.to_datetime(rd["Data da Conversão"], errors="coerce")
     rd_f = rd[(rd["Class"] == "MQL") & (rd["Grupo"] == "Fundo") & (rd["_dt"].dt.year >= ANO_INI)].copy()
+    # DEDUP de conversões duplicadas (chave OFICIAL email+identificador+data, doc de validação RD).
+    # Sem isso, conversões repetidas da API 2026 inflam o MQL (auditoria 2026-06-24: +546 fantasmas).
+    if "Identificador" in rd_f.columns:
+        _n = len(rd_f)
+        rd_f = rd_f.drop_duplicates(subset=["E-mail Lead", "Identificador", "Data da Conversão"])
+        if len(rd_f) != _n:
+            log(f"MQL dedup: removidas {_n - len(rd_f)} conversoes duplicadas (email+identificador+data)")
     rd_f["AnoMes"] = rd_f["_dt"].dt.to_period("M").astype(str)
     mqls_mes = rd_f["AnoMes"].value_counts().to_dict()
     mqls_total = int(len(rd_f))
-    log(f"MQLs Fundo (RD): {mqls_total:,}")
+    # Tipo de produto do MQL: curso NATIVO do RD (de-para do identificador, 100% preenchido) -> curso_tipo.
+    rd_f["_tipo"] = rd_f["Curso"].map(curso_tipo) if "Curso" in rd_f.columns else "outros"
+    log(f"MQLs Fundo (RD): {mqls_total:,}  | por tipo: " + ", ".join(f"{k}={v}" for k, v in rd_f["_tipo"].value_counts().items()))
 
     # ---------- Datas ----------
     neg["_criado"] = pd.to_datetime(neg["Negócio - Negócio criado em"], errors="coerce")
@@ -540,6 +581,32 @@ def main():
         rec["faturamento"] = round(rec["faturamento"] + float(sub["valor"].sum()), 2)
     curso_mensal = list(cm_acc.values())
 
+    # ---------- Detalhe POR NEGÓCIO do curso (drilldown reconciliável) ----------
+    # 1 linha por NEGÓCIO (que teve reunião OU foi ganho), keyada pela data de CRIAÇÃO.
+    # Reconcilia com curso_mensal: nº com reuniao == com_reuniao; nº com venda == ganhos (coorte criação,
+    # ciclo ~1 dia). Mostra lead + data + responsável (SDR/closer) e marca a que VIROU VENDA.
+    if "Pessoa - Nome" not in neg.columns: neg["Pessoa - Nome"] = ""
+    if "Pessoa - E-mail - Trabalho" not in neg.columns: neg["Pessoa - E-mail - Trabalho"] = ""
+    curso_negocio_detalhe = []
+    for nid, cu, nome_l, em_l, dt, sdr_l, clo_l, reu, won, val in zip(
+            neg["Negócio - ID"], neg["_curso"], neg["Pessoa - Nome"], neg["Pessoa - E-mail - Trabalho"],
+            neg["_criado"], neg["Negócio - Proprietário SDR"], neg["_closer"],
+            neg["tem_reuniao"], neg["is_ganho"], neg["valor"]):
+        if not (bool(reu) or bool(won)): continue
+        nome = str(nome_l).strip() if pd.notna(nome_l) and str(nome_l).strip() and str(nome_l).strip().lower() != "nan" else ""
+        if not nome:
+            nome = str(em_l).split("@")[0] if pd.notna(em_l) and "@" in str(em_l) else "(sem nome)"
+        s = str(sdr_l).strip()
+        cu_clean = "" if s.lower() in ("", "nan", "sem sdr", "(sem sdr)") else s
+        curso_negocio_detalhe.append({
+            "id": int(nid) if pd.notna(nid) else 0,
+            "curso": cu, "lead": nome,
+            "data": dt.strftime("%Y-%m-%d") if pd.notna(dt) else "",
+            "sdr": cu_clean, "closer": str(clo_l).strip() if pd.notna(clo_l) and str(clo_l).strip().lower() != "nan" else "",
+            "reuniao": bool(reu), "venda": bool(won),
+            "valor": round(float(val), 2) if bool(won) else 0.0,
+        })
+
     # ---------- Breakdown por TIPO de curso (filtro do front: MBA/Pós/Imersão) ----------
     # CLOSER × tipo × mês (métricas de negócio; vendas/fat por mês do GANHO)
     def _ct_vazio(c, tp, a, me):
@@ -601,6 +668,13 @@ def main():
         if d in _DNULL: continue
         _diarec(d)["mqls"] += len(sub)
     diario = list(dia_acc.values())
+
+    # (1b) MQLs por TIPO de produto × dia (curso nativo do RD -> curso_tipo). Soma por dia = mqls do dia.
+    mtd = {}
+    for (d, tp), sub in rd_f.groupby(["_cdata", "_tipo"]):
+        if d in _DNULL: continue
+        mtd[(d, tp)] = {"data": d, "tipo": tp, "mqls": int(len(sub))}
+    mqls_tipo_diario = list(mtd.values())
 
     # (2) SDR × tipo × dia (atividades)
     std = {}
@@ -712,8 +786,10 @@ def main():
         "venda_closer_curso_diario": venda_closer_curso_diario,
         "closer_curso_mensal": closer_curso_mensal,
         "curso_mensal": curso_mensal,
+        "curso_negocio_detalhe": curso_negocio_detalhe,
         # Séries DIÁRIAS (usadas quando há filtro de Dia/Range; espelham as mensais)
         "diario": diario,
+        "mqls_tipo_diario": mqls_tipo_diario,
         "sdr_tipo_diario": sdr_tipo_diario,
         "sdr_mqls_diario": sdr_mqls_diario,
         "sdr_vendas_diario": sdr_vendas_diario,
@@ -724,9 +800,10 @@ def main():
         "filtros_disponiveis": filtros,
     }
 
-    SAIDA.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    kb = SAIDA.stat().st_size / 1024
-    log(f"OK -> {SAIDA.name} ({kb:.0f} KB)")
+    _out = saida or SAIDA
+    _out.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    kb = _out.stat().st_size / 1024
+    log(f"OK -> {_out.name} ({kb:.0f} KB)")
     log(f"Closers: {len(closers)} | SDRs: {len(sdrs)} | meses: {len(mensal)}")
     log(f"diario: sdr_reun={len(sdr_reunioes_diario)} closer_vendas={len(closer_vendas_diario)} closer_curso={len(closer_curso_mensal)}")
 

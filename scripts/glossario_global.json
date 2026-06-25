@@ -1,0 +1,47 @@
+{
+  "_meta": "Glossario UNICO de curso/produto/turma para COMERCIAL e MARKETING. Fonte de verdade dos nomes canonicos (acentuados = nome de exibicao). Seedado IDENTICO ao _CURSO_CANON_DEF (comercial_pipeline, aprovado cliente 2026-06-22) + politicas de grupo/remocao do marketing. Editar AQUI; os pipelines leem via glossario.py. As CHAVES das listas sao normalizadas (sem acento, minuscula, sem turma).",
+  "curso_canon": {
+    "MBA em Liderança, Gestão e Estratégia no Agronegócio": ["mba em lideranca gestao e estrategia no agronegocio", "mba lge", "mba lideranca gestao e estrategia"],
+    "MBA em Liderança e Gestão de Pessoas no Agronegócio": ["mba em lideranca e gestao de pessoas no agronegocio"],
+    "MBA em Gestão de Propriedades Agrícolas": ["mba em gestao de propriedades agricolas", "mba gestao de propriedades agricolas"],
+    "MBA em Gestão de Times Comerciais": ["mba em gestao de times comerciais", "mba gestao de times comerciais"],
+    "MBA em Marketing e Vendas no Agronegócio": ["mba em marketing e vendas no agronegocio", "mba marketing e vendas"],
+    "MBA em Marketing Estratégico no Agronegócio": ["mba em marketing estrategico no agronegocio"],
+    "MBA em Vendas no Agronegócio": ["mba em vendas no agronegocio"],
+    "MBA em Agronegócios": ["mba em agronegocios"],
+    "MBA em Inteligência Artificial para Líderes do Agronegócio": ["mba em inteligencia artificial para lideres do agronegocio"],
+    "Pós-Graduação em Cana-de-Açúcar": ["pos graduacao em cana de acucar", "pos graduacao cana de acucar"],
+    "Pós-Graduação em Fisiologia Vegetal e Nutrição de Plantas": ["pos graduacao em fisiologia vegetal e nutricao de plantas", "pos em fisiologia vegetal e nutricao de plantas", "pos graduacao fisiologia vegetal", "pos fisiologia e nutricao"],
+    "Pós-Graduação em Bioinsumos": ["pos graduacao em bioinsumos", "pos em bioinsumos", "pos bioinsumos", "pos graduacao bioinsumos", "bioinsumos"],
+    "Pós-Graduação em Solos e Fertilidade do Solo": ["pos graduacao em solos e fertilidade do solo", "pos graduacao em fertilidade e saude do solo", "pos graduacao em fertilidade e saude do solos"],
+    "Pós-Graduação em Soja e Milho": ["pos graduacao em soja e milho"],
+    "Pós-Graduação em Saúde do Solo": ["pos graduacao em saude do solo"],
+    "Pós-Graduação em Nutrologia Vegetal": ["pos graduacao em nutrologia vegetal"],
+    "Imersão IA no Agro [MT]": ["imersao ia no agro [mt]", "imersao ia no agro lucas do rio verde", "imersao ia no agro sorriso", "imersao ia no agro sor"],
+    "Imersão IA no Agro": ["imersao ia no agro"],
+    "Imersão Dinheiro no Agro": ["imersao dinheiro no agro"],
+    "Imersão Internacional China": ["imersao internacional china"],
+    "Imersão Marketing e Vendas no Agro": ["imersao marketing e vendas no agro"],
+    "Imersão Produtores de Alta Performance": ["imersao produtores de alta performance", "imersao producao de alta performance", "agroadvance forum produtores de alta performance"],
+    "Sucessores no Agro": ["sucessores no agro", "sucessores do agro"],
+    "Simpósio Brasileiro de Saúde do Solo": ["simposio brasileiro de saude do solo", "simposio solo"],
+    "Academia de Líderes do Agro": ["academia de lideres do agro"]
+  },
+  "forca_topo": [
+    "Ebook Conceitos de Liderança - LGE",
+    "Ebook Gestão de Time - GTC",
+    "Masterclass Estrátégia MKT e Vendas - MVA",
+    "Masterclass Canavial em Foco - PCA",
+    "Masterclass Gestão Opercional - GPA",
+    "Masterclass Gestão Tributaria - GPA",
+    "Especialista em Bioinsumos - Da producao ao manejo"
+  ],
+  "remover": ["Teste", "Data Science"],
+  "remover_prefixo": ["expert"],
+  "fonte_aliases": {
+    "meta": "Meta Ads",
+    "google": "Google Ads",
+    "linkedin": "LinkedIn Ads",
+    "microsoft": "Microsoft Ads"
+  }
+}
