@@ -403,6 +403,7 @@ def carrega_bases():
     inv.columns = [str(c).strip() for c in inv.columns]
     valida_schema(inv, "Investimento", ARQ_INV)
     inv["Data"] = pd.to_datetime(inv["Data"], errors="coerce")
+    inv = inv[inv["Data"].notna()].drop_duplicates().copy()  # descarta orfa (sem data) + double-load
     inv["Fonte_norm"] = inv["Fonte"].apply(normaliza_fonte_inv_para_rd)
     # Normaliza rótulos de curso divergentes (Investimento → RD) para o custo casar
     inv["Curso"] = aplica_alias_curso(inv["Curso"])
@@ -568,13 +569,28 @@ def calcula_atribuicao(neg: pd.DataFrame, rd: pd.DataFrame) -> dict:
 # ----------------------------------------------------------------------------
 # KPIs por Grupo (Topo/Fundo)
 # ----------------------------------------------------------------------------
+def custo_grupo_janela(inv: pd.DataFrame, grupo: str) -> float:
+    """Custo do grupo na MESMA janela da receita atribuida (ANO_INI..ANO_FIM), deduplicado.
+
+    G2 + duplicidade: antes, o custo dos cards/financeiro somava TODOS os anos (2022+)
+    e contava linhas repetidas do investimento, enquanto a receita e' so 2025-26 ->
+    ROAS/CAC/CPL/CPMQL ~2x errados. Aqui alinhamos a janela e removemos duplicatas
+    (mesma Data+Campanha+Fonte+Custo)."""
+    g = inv[inv["Grupo"] == grupo].copy()
+    if "Segmento" in g.columns:  # escopo B2C: remove so o B2B explicito (~203 linhas);
+        g = g[g["Segmento"].astype(str).str.strip().str.upper() != "B2B"]  # mantem B2C e nao-rotulado
+    if "Data" in g.columns:
+        g = g[pd.to_datetime(g["Data"], errors="coerce").dt.year.between(ANO_INI, ANO_FIM)]
+    g = g.drop_duplicates()  # colapsa SO linha byte-identica (double-load do export); variacao legitima fica
+    return float(g["Custo"].sum())
+
+
 def kpis_por_grupo(rd: pd.DataFrame, inv: pd.DataFrame, grupo: str) -> dict:
     rd_g = rd[rd["Grupo"] == grupo].copy()
-    inv_g = inv[inv["Grupo"] == grupo].copy()
 
     leads = len(rd_g)
     mqls = int((rd_g["Class"] == "MQL").sum())
-    custo = float(inv_g["Custo"].sum())
+    custo = custo_grupo_janela(inv, grupo)
     pct_mql = to_pct(mqls, leads)
     cpl = round(safe_div(custo, leads), 2)
     cpmql = round(safe_div(custo, mqls), 2)
@@ -1642,8 +1658,7 @@ def kpis_financeiros(inv: pd.DataFrame, atribuicao: dict, grupo: str) -> dict:
     FUNDO: receita real (total dos ganhos) ÷ custo Fundo
     TOPO: receita INFLUENCIADA (ganhos assistidos pelo Topo) ÷ custo Topo
     """
-    inv_g = inv[inv["Grupo"] == grupo]
-    custo = float(inv_g["Custo"].sum())
+    custo = custo_grupo_janela(inv, grupo)
 
     if grupo == "Fundo":
         valor = atribuicao["fundo"]["faturamento_total"]
@@ -1997,6 +2012,187 @@ def campanhas_arvore_mensal(rd: pd.DataFrame, inv: pd.DataFrame, grupo: str) -> 
 
         campanhas.sort(key=lambda x: x["leads"], reverse=True)
         out.append({"periodo": m, "ano": ano, "mes": mes, "campanhas": campanhas})
+    return out
+
+
+def _rotulo_canal(x) -> str:
+    """Rótulo de canal/fonte limpo. 'nan'/'none'/vazio -> 'Desconhecido' (higiene)."""
+    s = str(x).strip()
+    return s if s and s.lower() not in ("nan", "none", "nat") else "Desconhecido"
+
+
+def limpa_rotulos_rd(rd: pd.DataFrame) -> pd.DataFrame:
+    """Normaliza Fonte/Canal/Plataforma do RD: NaN/'nan'/vazio -> 'Desconhecido'.
+    Evita o rótulo 'nan' vazando nos visuais (Canais & Fontes), nos filtros e no ROAS."""
+    for col in ("Fonte", "Canal", "Plataforma"):
+        if col in rd.columns:
+            rd[col] = rd[col].map(_rotulo_canal)
+    return rd
+
+
+def _emails_negocio(row) -> list:
+    """E-mails (Trabalho + Outros, normalizados) de um negócio. Mesmo critério do calcula_atribuicao."""
+    out = []
+    for col in ("Pessoa - E-mail - Trabalho", "Pessoa - E-mail - Outros"):
+        val = row.get(col)
+        if pd.notna(val):
+            for sub in str(val).lower().replace(";", ",").split(","):
+                sub = sub.strip()
+                if sub and sub != "nan":
+                    out.append(sub)
+    return out
+
+
+def atribui_canal_last_touch(neg: pd.DataFrame, rd: pd.DataFrame) -> list:
+    """Para cada Ganho, o canal/fonte LAST-TOUCH = o da ÚLTIMA conversão do lead com
+    data <= Data de Ganho. Sem lead casado (ou sem conversão anterior) -> 'Não atribuído'.
+    Decisão de negócio travada com o cliente em 2026-06-26 (last-touch).
+    Retorna [{ym, ano, mes, fonte, canal, valor}] — um registro por Ganho."""
+    cols = [c for c in ("E-mail Lead", "Data da Conversão", "Fonte", "Canal") if c in rd.columns]
+    r = rd[cols].dropna(subset=["E-mail Lead"]).copy()
+    r["email_norm"] = r["E-mail Lead"].astype(str).str.lower().str.strip()
+    r = r[r["email_norm"] != ""]
+    eventos = {}
+    for _, row in r.iterrows():
+        eventos.setdefault(row["email_norm"], []).append(
+            (row["Data da Conversão"], row.get("Fonte"), row.get("Canal")))
+
+    ganhos = neg[neg["Negócio - Status"] == "Ganho"]
+    regs = []
+    for _, row in ganhos.iterrows():
+        dg = row.get("Negócio - Ganho em")
+        if pd.isna(dg):
+            continue
+        valor = float(row["Negócio - Valor"]) if pd.notna(row.get("Negócio - Valor")) else 0.0
+        ym = pd.Timestamp(dg).strftime("%Y-%m")
+        evs = []
+        for e in _emails_negocio(row):
+            evs.extend(eventos.get(e, []))
+        validos = [(d, f, c) for (d, f, c) in evs if pd.notna(d) and d <= dg]
+        if validos:
+            _, f, c = max(validos, key=lambda t: t[0])  # last-touch = maior data <= ganho
+            fonte = _rotulo_canal(f)
+            canal = _rotulo_canal(c)
+        else:
+            fonte = canal = "Não atribuído"
+        regs.append({"ym": ym, "ano": int(ym[:4]), "mes": int(ym[5:7]),
+                     "fonte": fonte, "canal": canal, "valor": valor})
+    return regs
+
+
+def roas_canal_mensal(neg: pd.DataFrame, rd: pd.DataFrame, inv: pd.DataFrame) -> dict:
+    """Custo + receita_atribuída + ganhos por (mês, fonte) e por (mês, canal), para o
+    frontend recompor ROAS=Σreceita/Σcusto e CAC=Σcusto/Σganhos sob QUALQUER filtro
+    (canal + período). Custo = investimento B2C (todo Pago). Receita = last-touch.
+    Aditivo: não substitui nenhum bloco existente."""
+    regs = atribui_canal_last_touch(neg, rd)
+
+    inv_b2c = inv.copy()
+    if "Segmento" in inv_b2c.columns:  # escopo B2C: remove só o B2B explícito
+        inv_b2c = inv_b2c[inv_b2c["Segmento"].astype(str).str.strip().str.upper() != "B2B"]
+    inv_b2c = inv_b2c[inv_b2c["Data"].notna()].copy()
+    inv_b2c = inv_b2c.drop_duplicates()  # blinda double-load mesmo se a fonte vier com duplicata
+    inv_b2c["ym"] = inv_b2c["Data"].dt.to_period("M").astype(str)
+    custo_fonte = inv_b2c.groupby(["ym", "Fonte_norm"])["Custo"].sum()
+    custo_pago = inv_b2c.groupby("ym")["Custo"].sum()  # todo investimento = canal "Pago"
+
+    cells_f, cells_c = {}, {}
+
+    def _cell(d, key):
+        return d.setdefault(key, {"custo": 0.0, "receita": 0.0, "ganhos": 0})
+
+    for (ym, fonte), c in custo_fonte.items():
+        _cell(cells_f, (ym, str(fonte)))["custo"] += float(c)
+    for ym, c in custo_pago.items():
+        _cell(cells_c, (ym, "Pago"))["custo"] += float(c)
+    for rg in regs:
+        cf = _cell(cells_f, (rg["ym"], rg["fonte"]))
+        cf["receita"] += rg["valor"]; cf["ganhos"] += 1
+        cc = _cell(cells_c, (rg["ym"], rg["canal"]))
+        cc["receita"] += rg["valor"]; cc["ganhos"] += 1
+
+    def _serialize(cells, label_key):
+        out = []
+        for (ym, label), v in sorted(cells.items()):
+            out.append({"periodo": ym, "ano": int(ym[:4]), "mes": int(ym[5:7]),
+                        label_key: label, "custo": round(v["custo"], 2),
+                        "receita": round(v["receita"], 2), "ganhos": v["ganhos"]})
+        return out
+
+    return {
+        "modelo": ("last-touch: a venda credita o canal/fonte da ÚLTIMA conversão do lead "
+                   "até a data do ganho. Custo só existe no Pago (Meta/Google/…). "
+                   "Sem lead casado -> 'Não atribuído'."),
+        "por_fonte": _serialize(cells_f, "fonte"),
+        "por_canal": _serialize(cells_c, "canal"),
+    }
+
+
+def _norm_camp(s) -> str:
+    """Normaliza nome de campanha p/ casar RD(utm) × investimento(manual): sem acento,
+    minúsculo, separadores unificados. Resolve ~96% do R$ sem de-para manual."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")
+
+
+def _utm_part(detalhes, idx, chave):
+    """utm do traffic_source pipe-delimitado (source|medium|campaign|content); fallback utm_x=."""
+    s = str(detalhes or "")
+    p = s.split("|")
+    if len(p) > idx and p[idx].strip():
+        return p[idx].strip()
+    m = re.search(rf"utm_{chave}=([^|&]+)", s)
+    return m.group(1).strip() if m else ""
+
+
+# Fontes consideradas mídia paga (têm investimento). Casam com Fonte_norm do investimento.
+PAGO_FONTES = {"Meta Ads", "Google Ads", "LinkedIn Ads", "Microsoft Ads", "Youtube Ads"}
+
+
+def midia_granular(rd: pd.DataFrame, inv: pd.DataFrame) -> list:
+    """Árvore Fonte → Campanha → Criativo (mídia paga). Leads/MQLs do RD; custo do
+    investimento: fonte 100% confiável, campanha por nome normalizado (~96% do R$),
+    criativo SEM custo (plataforma não exporta). Custo de fonte não casado em campanha
+    vira 'custo_nao_rateado' → o total da fonte sempre fecha. Janela ANO_INI..ANO_FIM."""
+    r = rd[rd["Fonte"].isin(PAGO_FONTES)].copy()
+    det = "Origem da Conversão - Detalhes"
+    r["_camp"] = r[det].apply(lambda s: _utm_part(s, 2, "campaign"))
+    r["_crit"] = r[det].apply(lambda s: _utm_part(s, 3, "content"))
+    r["_mql"] = (r["Class"] == "MQL")
+
+    iv = inv.copy()
+    if "Segmento" in iv.columns:
+        iv = iv[iv["Segmento"].astype(str).str.strip().str.upper() != "B2B"]
+    if "Data" in iv.columns:
+        iv = iv[pd.to_datetime(iv["Data"], errors="coerce").dt.year.between(ANO_INI, ANO_FIM)]
+    iv = iv.drop_duplicates()
+    iv["_campn"] = iv["Campanha"].apply(_norm_camp)
+    custo_fonte = iv.groupby("Fonte_norm")["Custo"].sum().to_dict()
+    custo_fc = iv.groupby(["Fonte_norm", "_campn"])["Custo"].sum().to_dict()
+
+    out = []
+    for fonte in sorted(PAGO_FONTES):
+        rf = r[r["Fonte"] == fonte]
+        custo_f = float(custo_fonte.get(fonte, 0.0))
+        if rf.empty and custo_f == 0:
+            continue
+        camps, usado = [], 0.0
+        for camp, g in rf.groupby("_camp"):
+            nome = camp or "(sem campanha)"
+            cc = custo_fc.get((fonte, _norm_camp(camp))) if camp else None
+            if cc:
+                usado += float(cc)
+            criativos = [{"criativo": (cr or "(sem criativo)"), "leads": int(len(gc)),
+                          "mqls": int(gc["_mql"].sum())} for cr, gc in g.groupby("_crit")]
+            camps.append({"campanha": nome, "leads": int(len(g)), "mqls": int(g["_mql"].sum()),
+                          "custo": round(float(cc), 2) if cc is not None else None,
+                          "criativos": sorted(criativos, key=lambda x: -x["leads"])})
+        residual = round(custo_f - usado, 2)
+        out.append({"fonte": fonte, "leads": int(len(rf)), "mqls": int(rf["_mql"].sum()),
+                    "custo": round(custo_f, 2),
+                    "custo_nao_rateado": residual if residual > 0.5 else 0,
+                    "campanhas": sorted(camps, key=lambda x: -x["leads"])})
     return out
 
 
@@ -2360,6 +2556,12 @@ def main(bases=None):
     log("Conversões RD não classificadas (Grupo NULL)...")
     nao_class = nao_classificados_rd(rd)
 
+    log("ROAS por canal (last-touch, mensal Fonte/Canal)...")
+    roas_canal = roas_canal_mensal(neg, rd, inv)
+
+    log("Mídia paga — árvore Fonte→Campanha→Criativo...")
+    midia_arvore = midia_granular(rd, inv)
+
     payload = {
         "meta": {
             "atualizado_em": datetime.now().isoformat(timespec="seconds"),
@@ -2432,6 +2634,8 @@ def main(bases=None):
                 "reunioes_assistidas": len(atribuicao["topo"]["reunioes_assistidas_ids"]),
             },
         },
+        "roas_canal": roas_canal,
+        "midia_granular": midia_arvore,
         "nao_classificados": nao_class,
         "motivos_perda": perdas,
         "filtros_disponiveis": filtros,
